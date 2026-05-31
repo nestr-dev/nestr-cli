@@ -1,5 +1,8 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::oauth::StoredOAuthTokens;
@@ -138,6 +141,69 @@ pub fn profile_file(name: &str) -> PathBuf {
     profiles_dir().join(format!("{name}.toml"))
 }
 
+pub fn load_config() -> Result<Config> {
+    let path = config_file();
+    if !path.exists() {
+        return Ok(Config::default());
+    }
+    let raw =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    toml::from_str(&raw).context("parsing config.toml")
+}
+
+pub fn save_config(config: &Config) -> Result<()> {
+    std::fs::create_dir_all(config_dir())?;
+    let path = config_file();
+    let content = toml::to_string_pretty(config).context("serializing config")?;
+    std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+pub fn load_profile(name: &str) -> Result<Profile> {
+    let path = profile_file(name);
+    let raw = std::fs::read_to_string(&path).with_context(|| {
+        format!("Profile '{name}' not found. Run `nestr profiles add` to set it up.")
+    })?;
+    toml::from_str(&raw).with_context(|| format!("parsing profile '{name}'"))
+}
+
+pub fn save_profile(name: &str, profile: &Profile) -> Result<()> {
+    std::fs::create_dir_all(profiles_dir())?;
+    let path = profile_file(name);
+    let content = toml::to_string_pretty(profile).context("serializing profile")?;
+    std::fs::write(&path, &content).with_context(|| format!("writing {}", path.display()))?;
+    #[cfg(unix)]
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("setting permissions on {}", path.display()))?;
+    Ok(())
+}
+
+pub fn delete_profile_file(name: &str) -> Result<()> {
+    let path = profile_file(name);
+    if path.exists() {
+        std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub fn list_profile_names() -> Result<Vec<String>> {
+    let dir = profiles_dir();
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut names: Vec<String> = std::fs::read_dir(dir)?
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.extension()?.to_str()? != "toml" {
+                return None;
+            }
+            Some(path.file_stem()?.to_str()?.to_string())
+        })
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +250,30 @@ mod tests {
             oauth_tokens: None,
             default_output_format: None,
         }
+    }
+
+    #[test]
+    fn save_then_load_profile_roundtrips_and_is_0600() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("NESTR_HOME", tmp.path());
+
+        let p = test_profile("https://app.nestr.io");
+        save_profile("prod", &p).unwrap();
+
+        let loaded = load_profile("prod").unwrap();
+        assert_eq!(loaded.host, "https://app.nestr.io");
+        assert_eq!(loaded.workspace_id, "ws1");
+        assert_eq!(list_profile_names().unwrap(), vec!["prod".to_string()]);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(profile_file("prod"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        std::env::remove_var("NESTR_HOME");
     }
 }
