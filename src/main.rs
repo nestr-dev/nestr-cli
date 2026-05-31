@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use nestr_cli::commands::{auth, comments, inbox, me, nests, profiles, search};
+use nestr_cli::commands::{auth, comments, inbox, me, nests, plan, profiles, search};
 use nestr_cli::config::OutputFormat;
 
 /// Nestr CLI — fast, composable access to Nestr for terminals and agents.
@@ -22,7 +22,8 @@ use nestr_cli::config::OutputFormat;
   \x1b[1msearch\x1b[0m     Search nests across the workspace
   \x1b[1mnests\x1b[0m      Get, list, create, update, delete nests
   \x1b[1mcomments\x1b[0m   List, add, edit, delete comments
-  \x1b[1minbox\x1b[0m      Capture and manage inbox items"
+  \x1b[1minbox\x1b[0m      Capture and manage inbox items
+  \x1b[1mplan\x1b[0m       Show/manage today's plan"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -108,6 +109,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::inbox::InboxCmd,
     },
+    /// Your daily plan (the `now` list).
+    Plan {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::plan::PlanCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -173,6 +179,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Nests { cmd } => nests::run(cmd, &g).await,
         Commands::Comments { cmd } => comments::run(cmd, &g).await,
         Commands::Inbox { cmd } => inbox::run(cmd, &g).await,
+        Commands::Plan { cmd } => plan::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
