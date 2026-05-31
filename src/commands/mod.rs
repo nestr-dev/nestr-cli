@@ -10,7 +10,7 @@ pub mod notifications;
 pub mod plan;
 pub mod projects;
 pub mod search;
-// pub mod work;
+pub mod work;
 
 use anyhow::Result;
 
