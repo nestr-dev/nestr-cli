@@ -7,6 +7,26 @@ use crate::error::{extract_error_detail, NestrError, Result};
 
 const CLIENT_CONSUMER: &str = "nestr-cli";
 
+/// Defensively unwrap Nestr's `{status, data, meta?, links?}` envelope.
+/// Only unwraps when `data` sits alongside an envelope sibling (`status`/`meta`/`links`);
+/// otherwise returns the value untouched. Call per-endpoint — never blindly on `/users/me`.
+pub fn unwrap_data(v: Value) -> (Value, Option<Value>, Option<Value>) {
+    if let Value::Object(mut map) = v {
+        let wrapped = map.contains_key("data")
+            && (map.contains_key("status")
+                || map.contains_key("meta")
+                || map.contains_key("links"));
+        if wrapped {
+            let data = map.remove("data").unwrap_or(Value::Null);
+            let meta = map.remove("meta");
+            let links = map.remove("links");
+            return (data, meta, links);
+        }
+        return (Value::Object(map), None, None);
+    }
+    (v, None, None)
+}
+
 /// Thin reqwest wrapper pre-configured with Nestr auth + consumer headers.
 #[derive(Clone)]
 pub struct NestrClient {
@@ -115,5 +135,43 @@ impl NestrClient {
                 message: msg,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn unwrap_data_pulls_data_when_wrapped() {
+        let v = json!({"status":"ok","data":[{"_id":"a"}],"meta":{"total":1},"links":{"next":"x"}});
+        let (data, meta, links) = unwrap_data(v);
+        assert_eq!(data, json!([{"_id":"a"}]));
+        assert_eq!(meta, Some(json!({"total":1})));
+        assert_eq!(links, Some(json!({"next":"x"})));
+    }
+
+    #[test]
+    fn unwrap_data_passes_through_bare_object() {
+        let v = json!({"_id":"u1","profile":{"fullName":"A"}});
+        let (data, meta, links) = unwrap_data(v.clone());
+        assert_eq!(data, v);
+        assert!(meta.is_none() && links.is_none());
+    }
+
+    #[test]
+    fn unwrap_data_passes_through_bare_array() {
+        let v = json!([{"_id":"a"},{"_id":"b"}]);
+        let (data, _, _) = unwrap_data(v.clone());
+        assert_eq!(data, v);
+    }
+
+    #[test]
+    fn unwrap_data_keeps_object_that_only_has_data_key() {
+        // A real nest could legitimately have a `data` field with no envelope siblings.
+        let v = json!({"data":{"k":1}});
+        let (data, _, _) = unwrap_data(v.clone());
+        assert_eq!(data, v);
     }
 }
