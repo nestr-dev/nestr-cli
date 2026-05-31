@@ -37,7 +37,10 @@ pub enum InboxCmd {
         completed: Option<bool>,
     },
     /// Reorder inbox items to the given order.
-    Reorder { ids: Vec<String> },
+    Reorder {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
 }
 
 pub async fn fetch_list(

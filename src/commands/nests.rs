@@ -81,6 +81,7 @@ pub enum NestsCmd {
     /// Reorder a set of nests in the workspace to the given order.
     BulkReorder {
         /// Nest ids in the desired order.
+        #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
     },
     /// Add or remove a label on a nest.

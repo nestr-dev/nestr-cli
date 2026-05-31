@@ -100,3 +100,54 @@ async fn delete_hits_delete_path() {
     let data = nests::delete_nest(&client, "x").await.unwrap();
     assert_eq!(data["nestId"], "x");
 }
+
+// Proves the spec §11 / §8 read-only guarantee end-to-end: a write subcommand
+// run under `--read-only` errors via the gate and fires NO write API call. Uses an
+// api-key file profile so client resolution touches no network at all.
+#[tokio::test]
+async fn read_only_blocks_delete_before_writing() {
+    use nestr_cli::commands::GlobalArgs;
+    use nestr_cli::config::{save_profile, AuthKind, CredentialStorage, Profile};
+
+    let server = MockServer::start().await;
+    // If the gate failed, the DELETE would fire; expect(0) asserts it never does.
+    Mock::given(method("DELETE"))
+        .and(path("/api/nests/x"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    std::env::set_var("NESTR_HOME", tmp.path());
+    let profile = Profile {
+        auth: AuthKind::ApiKey,
+        credential_storage: CredentialStorage::File,
+        host: server.uri(),
+        workspace_id: "ws".into(),
+        api_key: Some("k".into()),
+        label: None,
+        oauth_client_id: None,
+        oauth_token_url: None,
+        oauth_authorize_url: None,
+        oauth_tokens: None,
+        default_output_format: None,
+    };
+    save_profile("ro", &profile).unwrap();
+
+    let g = GlobalArgs {
+        profile: Some("ro".into()),
+        read_only: true,
+        yes: true,
+        ..Default::default()
+    };
+    let err = nests::run(nests::NestsCmd::Delete { id: "x".into() }, &g)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("read-only"),
+        "expected a read-only error, got: {err}"
+    );
+
+    std::env::remove_var("NESTR_HOME");
+}

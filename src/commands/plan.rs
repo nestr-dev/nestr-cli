@@ -11,9 +11,15 @@ pub enum PlanCmd {
     /// Show today's plan (nests labelled `now`).
     Today,
     /// Add nests to today's plan.
-    Add { ids: Vec<String> },
+    Add {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
     /// Remove nests from today's plan.
-    Remove { ids: Vec<String> },
+    Remove {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
 }
 
 pub async fn fetch_today(client: &NestrClient) -> crate::error::Result<Value> {
