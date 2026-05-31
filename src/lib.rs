@@ -6,3 +6,4 @@ pub mod keyring_store;
 pub mod oauth;
 pub mod render;
 pub mod safety;
+pub mod views;
