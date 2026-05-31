@@ -1,9 +1,13 @@
-use reqwest::{header, Client, StatusCode};
+use std::sync::Arc;
+
+use reqwest::{header, Client, Method, StatusCode};
 use rustls;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tokio::sync::RwLock;
 
 use crate::error::{extract_error_detail, NestrError, Result};
+use crate::oauth::ReactiveRefresh;
 
 const CLIENT_CONSUMER: &str = "nestr-cli";
 
@@ -27,22 +31,29 @@ pub fn unwrap_data(v: Value) -> (Value, Option<Value>, Option<Value>) {
     (v, None, None)
 }
 
-/// Thin reqwest wrapper pre-configured with Nestr auth + consumer headers.
+/// Thin reqwest wrapper. The bearer lives in a shared cell so a reactive refresh
+/// can swap it mid-flight; consumer + content-type headers are baked in.
 #[derive(Clone)]
 pub struct NestrClient {
     inner: Client,
     api_base: String,
+    auth: Arc<RwLock<String>>,
+    refresh: Option<ReactiveRefresh>,
 }
 
 impl NestrClient {
-    /// `api_base` is e.g. `https://app.nestr.io/api`; `bearer` is the token.
+    /// No reactive refresh (API-key profiles, tests).
     pub fn new(api_base: impl Into<String>, bearer: &str) -> Result<Self> {
+        Self::with_refresh(api_base, bearer, None)
+    }
+
+    /// With an optional reactive-refresh context (OAuth profiles).
+    pub fn with_refresh(
+        api_base: impl Into<String>,
+        bearer: &str,
+        refresh: Option<ReactiveRefresh>,
+    ) -> Result<Self> {
         let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {bearer}"))
-                .map_err(|_| NestrError::Auth("invalid token format".into()))?,
-        );
         headers.insert(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -51,8 +62,6 @@ impl NestrClient {
             "X-Client-Consumer",
             header::HeaderValue::from_static(CLIENT_CONSUMER),
         );
-        // Install the ring crypto provider if no global provider has been set yet.
-        // Required because we use `rustls-no-provider` (no provider is bundled by default).
         let _ = rustls::crypto::ring::default_provider().install_default();
         let inner = Client::builder()
             .default_headers(headers)
@@ -61,53 +70,72 @@ impl NestrClient {
         Ok(Self {
             inner,
             api_base: api_base.into(),
+            auth: Arc::new(RwLock::new(bearer.to_string())),
+            refresh,
         })
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str, params: &[(&str, &str)]) -> Result<T> {
-        let resp = self
-            .inner
-            .get(format!("{}{path}", self.api_base))
-            .query(params)
-            .send()
-            .await?;
-        let text = self.checked_text(resp).await?;
-        Ok(serde_json::from_str(&text)?)
+        self.request(Method::GET, path, params, None).await
     }
 
     pub async fn post<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        let resp = self
-            .inner
-            .post(format!("{}{path}", self.api_base))
-            .json(body)
-            .send()
-            .await?;
-        let text = self.checked_text(resp).await?;
-        let json = if text.trim().is_empty() { "{}" } else { &text };
-        Ok(serde_json::from_str(json)?)
+        self.request(Method::POST, path, &[], Some(body)).await
     }
 
     pub async fn patch<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        let resp = self
-            .inner
-            .patch(format!("{}{path}", self.api_base))
-            .json(body)
-            .send()
-            .await?;
+        self.request(Method::PATCH, path, &[], Some(body)).await
+    }
+
+    pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        self.request(Method::DELETE, path, &[], None).await
+    }
+
+    /// Single code path for all verbs. On a 403 with a refresh context, refresh
+    /// the token once and retry; a still-403 falls through to the error mapping.
+    async fn request<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<T> {
+        let url = format!("{}{path}", self.api_base);
+        let resp = self.send(&method, &url, query, body).await?;
+        // On a 403 with a refresh context, refresh the token once and retry.
+        let resp = match (resp.status(), &self.refresh) {
+            (StatusCode::FORBIDDEN, Some(r)) => {
+                let new_token = r
+                    .perform()
+                    .await
+                    .map_err(|e| NestrError::Auth(format!("token refresh failed: {e}")))?;
+                *self.auth.write().await = new_token;
+                self.send(&method, &url, query, body).await?
+            }
+            _ => resp,
+        };
         let text = self.checked_text(resp).await?;
         let json = if text.trim().is_empty() { "{}" } else { &text };
         Ok(serde_json::from_str(json)?)
     }
 
-    pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let resp = self
+    async fn send(
+        &self,
+        method: &Method,
+        url: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<reqwest::Response> {
+        let token = self.auth.read().await.clone();
+        let mut rb = self
             .inner
-            .delete(format!("{}{path}", self.api_base))
-            .send()
-            .await?;
-        let text = self.checked_text(resp).await?;
-        let json = if text.trim().is_empty() { "{}" } else { &text };
-        Ok(serde_json::from_str(json)?)
+            .request(method.clone(), url)
+            .query(query)
+            .bearer_auth(token);
+        if let Some(b) = body {
+            rb = rb.json(b);
+        }
+        Ok(rb.send().await?)
     }
 
     /// Validate status and return the body text, mapping Nestr's status codes.

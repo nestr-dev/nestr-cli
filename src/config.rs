@@ -178,6 +178,16 @@ pub fn save_profile(name: &str, profile: &Profile) -> Result<()> {
     Ok(())
 }
 
+/// Update just the OAuth token set on a stored profile (used by reactive refresh).
+pub fn update_profile_oauth_tokens(
+    name: &str,
+    tokens: &crate::oauth::StoredOAuthTokens,
+) -> Result<()> {
+    let mut profile = load_profile(name)?;
+    profile.oauth_tokens = Some(tokens.clone());
+    save_profile(name, &profile)
+}
+
 pub fn delete_profile_file(name: &str) -> Result<()> {
     let path = profile_file(name);
     if path.exists() {
@@ -222,6 +232,7 @@ pub struct ResolvedConfig {
     pub api_base: String,
     pub workspace_id: String,
     pub output: OutputFormat,
+    pub refresh: Option<crate::oauth::ReactiveRefresh>,
 }
 
 /// Resolve the active profile into a ready-to-use config.
@@ -282,6 +293,27 @@ pub async fn resolve(
         .or(profile.default_output_format)
         .unwrap_or(global.default_output_format);
 
+    // Build the reactive-refresh context for OAuth profiles that still hold a
+    // refresh token (so a 403 can refresh-and-retry once). API-key profiles: None.
+    let refresh = if profile.auth == AuthKind::OAuth {
+        crate::oauth::current_refresh_token(
+            &name,
+            profile.credential_storage,
+            profile.oauth_tokens.as_ref(),
+        )?
+        .map(|rt| {
+            crate::oauth::ReactiveRefresh::new(
+                profile.token_url(),
+                profile.client_id(),
+                name.clone(),
+                profile.credential_storage,
+                rt,
+            )
+        })
+    } else {
+        None
+    };
+
     Ok(ResolvedConfig {
         profile_name: name,
         bearer,
@@ -289,12 +321,17 @@ pub async fn resolve(
         api_base: profile.api_base(),
         workspace_id: profile.workspace_id.clone(),
         output,
+        refresh,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serialize tests that mutate the NESTR_HOME env var so they don't race.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn config_dir_uses_nestr_home_override() {
@@ -341,6 +378,27 @@ mod tests {
     }
 
     #[test]
+    fn update_profile_oauth_tokens_roundtrips() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("NESTR_HOME", tmp.path());
+        let mut p = test_profile("https://app.nestr.io");
+        p.auth = AuthKind::OAuth;
+        save_profile("oauthp", &p).unwrap();
+
+        let toks = crate::oauth::StoredOAuthTokens {
+            access_token: "acc".into(),
+            refresh_token: Some("ref".into()),
+            id_token: None,
+            expiry: Some(crate::oauth::unix_now_secs() + 99),
+        };
+        update_profile_oauth_tokens("oauthp", &toks).unwrap();
+        let loaded = load_profile("oauthp").unwrap();
+        assert_eq!(loaded.oauth_tokens.unwrap().access_token, "acc");
+        std::env::remove_var("NESTR_HOME");
+    }
+
+    #[test]
     fn precedence_flag_beats_env_beats_profile() {
         assert_eq!(
             resolve_bearer_precedence(Some("flag"), Some("env"), Some("prof")),
@@ -359,6 +417,7 @@ mod tests {
 
     #[test]
     fn save_then_load_profile_roundtrips_and_is_0600() {
+        let _lock = ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var("NESTR_HOME", tmp.path());
 

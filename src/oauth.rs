@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -8,6 +9,7 @@ use rand::seq::SliceRandom;
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::RwLock;
 
 use crate::config::CredentialStorage;
 
@@ -277,7 +279,7 @@ pub fn store_tokens_keyring(profile: &str, t: &TokenResponse) -> Result<()> {
     crate::keyring_store::store_secret(profile, "oauth_tokens", &json)
 }
 
-fn load_tokens_keyring(profile: &str) -> Result<Option<StoredOAuthTokens>> {
+pub(crate) fn load_tokens_keyring(profile: &str) -> Result<Option<StoredOAuthTokens>> {
     match crate::keyring_store::get_secret(profile, "oauth_tokens")? {
         Some(json) => Ok(Some(serde_json::from_str(&json)?)),
         None => Ok(None),
@@ -319,6 +321,66 @@ pub async fn resolve_token(
             let stored = tokens_to_stored(&refreshed);
             Ok((stored.access_token.clone(), Some(stored)))
         }
+    }
+}
+
+/// Read the current refresh token for a profile, from whichever store it uses.
+pub fn current_refresh_token(
+    profile_name: &str,
+    storage: CredentialStorage,
+    file_tokens: Option<&StoredOAuthTokens>,
+) -> anyhow::Result<Option<String>> {
+    let tokens = match storage {
+        CredentialStorage::OsStore => load_tokens_keyring(profile_name)?,
+        CredentialStorage::File => file_tokens.cloned(),
+    };
+    Ok(tokens.and_then(|t| t.refresh_token))
+}
+
+/// Carries everything the client needs to refresh-and-persist on a 403.
+/// Cloneable: the `refresh_token` is shared so a rotation is visible to all clones.
+#[derive(Debug, Clone)]
+pub struct ReactiveRefresh {
+    pub token_url: String,
+    pub client_id: String,
+    pub profile_name: String,
+    pub storage: CredentialStorage,
+    pub refresh_token: Arc<RwLock<String>>,
+}
+
+impl ReactiveRefresh {
+    pub fn new(
+        token_url: String,
+        client_id: String,
+        profile_name: String,
+        storage: CredentialStorage,
+        refresh_token: String,
+    ) -> Self {
+        Self {
+            token_url,
+            client_id,
+            profile_name,
+            storage,
+            refresh_token: Arc::new(RwLock::new(refresh_token)),
+        }
+    }
+
+    /// Refresh the access token, persist the new set, rotate the refresh token,
+    /// and return the fresh access token.
+    pub async fn perform(&self) -> anyhow::Result<String> {
+        let rt = self.refresh_token.read().await.clone();
+        let resp = refresh(&self.token_url, &self.client_id, &rt).await?;
+        let stored = tokens_to_stored(&resp);
+        match self.storage {
+            CredentialStorage::OsStore => store_tokens_keyring(&self.profile_name, &resp)?,
+            CredentialStorage::File => {
+                crate::config::update_profile_oauth_tokens(&self.profile_name, &stored)?
+            }
+        }
+        if let Some(new_rt) = &resp.refresh_token {
+            *self.refresh_token.write().await = new_rt.clone();
+        }
+        Ok(stored.access_token)
     }
 }
 
