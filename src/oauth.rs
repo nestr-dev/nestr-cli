@@ -279,6 +279,12 @@ pub fn store_tokens_keyring(profile: &str, t: &TokenResponse) -> Result<()> {
     crate::keyring_store::store_secret(profile, "oauth_tokens", &json)
 }
 
+/// Persist an already-built token set to the OS keyring.
+pub(crate) fn store_stored_tokens_keyring(profile: &str, stored: &StoredOAuthTokens) -> Result<()> {
+    let json = serde_json::to_string(stored)?;
+    crate::keyring_store::store_secret(profile, "oauth_tokens", &json)
+}
+
 pub(crate) fn load_tokens_keyring(profile: &str) -> Result<Option<StoredOAuthTokens>> {
     match crate::keyring_store::get_secret(profile, "oauth_tokens")? {
         Some(json) => Ok(Some(serde_json::from_str(&json)?)),
@@ -312,15 +318,17 @@ pub async fn resolve_token(
     })?;
 
     let refreshed = refresh(token_url, client_id, &refresh_token).await?;
+    let mut stored = tokens_to_stored(&refreshed);
+    // Preserve the existing refresh token if the server omitted a new one (RFC 6749 §6).
+    if stored.refresh_token.is_none() {
+        stored.refresh_token = Some(refresh_token.clone());
+    }
     match storage {
         CredentialStorage::OsStore => {
-            store_tokens_keyring(profile_name, &refreshed)?;
-            Ok((refreshed.access_token, None))
+            store_stored_tokens_keyring(profile_name, &stored)?;
+            Ok((stored.access_token.clone(), None))
         }
-        CredentialStorage::File => {
-            let stored = tokens_to_stored(&refreshed);
-            Ok((stored.access_token.clone(), Some(stored)))
-        }
+        CredentialStorage::File => Ok((stored.access_token.clone(), Some(stored))),
     }
 }
 
@@ -341,11 +349,11 @@ pub fn current_refresh_token(
 /// Cloneable: the `refresh_token` is shared so a rotation is visible to all clones.
 #[derive(Debug, Clone)]
 pub struct ReactiveRefresh {
-    pub token_url: String,
-    pub client_id: String,
-    pub profile_name: String,
-    pub storage: CredentialStorage,
-    pub refresh_token: Arc<RwLock<String>>,
+    token_url: String,
+    client_id: String,
+    profile_name: String,
+    storage: CredentialStorage,
+    refresh_token: Arc<RwLock<String>>,
 }
 
 impl ReactiveRefresh {
@@ -370,15 +378,20 @@ impl ReactiveRefresh {
     pub async fn perform(&self) -> anyhow::Result<String> {
         let rt = self.refresh_token.read().await.clone();
         let resp = refresh(&self.token_url, &self.client_id, &rt).await?;
-        let stored = tokens_to_stored(&resp);
+        let mut stored = tokens_to_stored(&resp);
+        // RFC 6749 §6: a refresh response MAY omit refresh_token, meaning "keep the old one".
+        if stored.refresh_token.is_none() {
+            stored.refresh_token = Some(rt.clone());
+        }
         match self.storage {
-            CredentialStorage::OsStore => store_tokens_keyring(&self.profile_name, &resp)?,
+            CredentialStorage::OsStore => store_stored_tokens_keyring(&self.profile_name, &stored)?,
             CredentialStorage::File => {
                 crate::config::update_profile_oauth_tokens(&self.profile_name, &stored)?
             }
         }
-        if let Some(new_rt) = &resp.refresh_token {
-            *self.refresh_token.write().await = new_rt.clone();
+        // Keep the in-memory cell in sync with what we persisted.
+        if let Some(rt2) = &stored.refresh_token {
+            *self.refresh_token.write().await = rt2.clone();
         }
         Ok(stored.access_token)
     }

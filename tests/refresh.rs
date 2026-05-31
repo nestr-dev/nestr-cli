@@ -27,6 +27,7 @@ async fn refreshes_and_retries_once_on_403() {
             ResponseTemplate::new(403).set_body_json(serde_json::json!({"description":"nope"})),
         )
         .up_to_n_times(1)
+        .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
