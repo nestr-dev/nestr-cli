@@ -4,6 +4,7 @@ use serde_json::Value;
 use tabled::builder::Builder;
 
 use crate::config::OutputFormat;
+use crate::views::CompactNest;
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
     Ok(serde_json::to_string_pretty(rows)?)
@@ -44,6 +45,118 @@ pub fn render_object(
     Ok(())
 }
 
+/// Pretty-print a raw value as-is (array or object) — the `-o json` path.
+pub fn print_json(value: &Value) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+/// Standard compact table for any list of Nest-shaped objects.
+pub fn nest_table(nests: &[CompactNest]) -> String {
+    let rows: Vec<Vec<String>> = nests
+        .iter()
+        .map(|n| {
+            vec![
+                n.id.clone(),
+                n.title.clone(),
+                n.due.clone().unwrap_or_default(),
+                match n.completed {
+                    Some(true) => "✓".to_string(),
+                    _ => String::new(),
+                },
+                n.labels_str(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "DUE", "DONE", "LABELS"], rows)
+}
+
+/// Render a list of Nest-shaped objects: raw JSON, or a compact table + footers.
+pub fn output_nests(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let nests: Vec<CompactNest> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if nests.is_empty() {
+                print_no_results("No results.");
+                return Ok(());
+            }
+            println!("{}", nest_table(&nests));
+            if let Some(f) = pagination_footer(meta) {
+                println!("{f}");
+            }
+            if let Some(h) = hint_line(data) {
+                println!("{h}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Render a single Nest-shaped object as a detail block (or raw JSON).
+pub fn output_nest_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let n: CompactNest = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", n.title, n.id);
+            if let Some(p) = n.purpose.as_deref().filter(|s| !s.is_empty()) {
+                println!("purpose: {p}");
+            }
+            if !n.labels.is_empty() {
+                println!("labels: {}", n.labels_str());
+            }
+            if let Some(d) = &n.due {
+                println!("due: {d}");
+            }
+            if let Some(c) = n.completed {
+                println!("completed: {c}");
+            }
+            if let Some(h) = hint_line(data) {
+                println!("{h}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build a `page x/y · N total · --page n for more` footer from a `meta` object.
+pub fn pagination_footer(meta: Option<&Value>) -> Option<String> {
+    let m = meta?;
+    let page = m.get("page").and_then(Value::as_u64)?;
+    let total_pages = m.get("total_pages").and_then(Value::as_u64).unwrap_or(page);
+    let mut s = format!("page {page}/{total_pages}");
+    if let Some(total) = m.get("total").and_then(Value::as_u64) {
+        s.push_str(&format!(" · {total} total"));
+    }
+    if page < total_pages {
+        s.push_str(&format!(" · --page {} for more", page + 1));
+    }
+    Some(s.dimmed().to_string())
+}
+
+/// Best-effort: surface the first `hints[].url` found anywhere in the payload.
+/// Phase 1 does not request hints by default, so this is usually dormant.
+pub fn hint_line(data: &Value) -> Option<String> {
+    fn find(v: &Value) -> Option<String> {
+        match v {
+            Value::Array(a) => a.iter().find_map(find),
+            Value::Object(o) => {
+                if let Some(Value::Array(hints)) = o.get("hints") {
+                    for h in hints {
+                        if let Some(u) = h.get("url").and_then(Value::as_str) {
+                            return Some(u.to_string());
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    find(data).map(|u| format!("next: {u}").dimmed().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +189,43 @@ mod tests {
             multiple.starts_with('['),
             "multiple elements should be a JSON array, got: {multiple}"
         );
+    }
+
+    #[test]
+    fn nest_table_renders_id_and_title() {
+        use crate::views::CompactNest;
+        let n: CompactNest =
+            serde_json::from_value(json!({"_id":"abc","title":"Do thing","labels":["now"]}))
+                .unwrap();
+        let out = nest_table(&[n]);
+        assert!(out.contains("abc"));
+        assert!(out.contains("Do thing"));
+        assert!(out.contains("now"));
+    }
+
+    #[test]
+    fn pagination_footer_present_only_when_more_pages() {
+        let meta = json!({"page":1,"total_pages":3,"total":57});
+        let f = pagination_footer(Some(&meta)).unwrap();
+        assert!(f.contains("page 1/3"));
+        assert!(f.contains("57 total"));
+        assert!(f.contains("--page 2"));
+        // Last page → no "for more" hint, but still a footer.
+        let last = json!({"page":3,"total_pages":3,"total":57});
+        assert!(!pagination_footer(Some(&last)).unwrap().contains("for more"));
+        // No meta → no footer.
+        assert!(pagination_footer(None).is_none());
+    }
+
+    #[test]
+    fn hint_line_none_when_absent() {
+        assert!(hint_line(&json!([{"_id":"a"}])).is_none());
+    }
+
+    #[test]
+    fn hint_line_extracts_first_url() {
+        let data = json!([{"_id":"a","hints":[{"url":"/nests/a/children?search=x"}]}]);
+        let line = hint_line(&data).unwrap();
+        assert!(line.contains("/nests/a/children?search=x"));
     }
 }
