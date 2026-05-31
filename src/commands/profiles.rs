@@ -11,10 +11,14 @@ fn pick_storage() -> Result<CredentialStorage> {
     let choice = Select::new("Where should credentials be stored?", STORAGE.to_vec())
         .with_help_message("'file' = profile TOML (0600). 'os-store' = OS keyring.")
         .prompt()?;
-    Ok(match choice {
-        "os-store" => CredentialStorage::OsStore,
-        _ => CredentialStorage::File,
-    })
+    match choice {
+        "os-store" if !keyring_store::os_keyring_available() => bail!(
+            "This build has no OS keyring backend (e.g. static musl Linux binaries ship without one), \
+             so 'os-store' would silently lose credentials. Choose 'file' storage instead."
+        ),
+        "os-store" => Ok(CredentialStorage::OsStore),
+        _ => Ok(CredentialStorage::File),
+    }
 }
 
 pub fn run_list() -> Result<()> {

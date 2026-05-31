@@ -38,6 +38,7 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 
+# NOTE: musl builds have no keyring backend - users must use file-based credential storage
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service"] }
 

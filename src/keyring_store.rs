@@ -1,8 +1,21 @@
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 const SERVICE_NAME: &str = "nestr-cli";
+
+/// True when a real OS keyring backend is compiled into this build. When false
+/// (e.g. static `musl` Linux binaries, which ship no backend), the `keyring`
+/// crate silently falls back to a non-persistent in-memory mock — so `os-store`
+/// credential storage would lose secrets. Keep this in sync with the
+/// platform-gated `keyring` backend features in Cargo.toml.
+pub fn os_keyring_available() -> bool {
+    cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        all(target_os = "linux", not(target_env = "musl")),
+    ))
+}
 
 type SecretMap = HashMap<String, String>;
 
@@ -34,6 +47,12 @@ fn save_map(profile: &str, map: &SecretMap) -> Result<()> {
 }
 
 pub fn store_secret(profile: &str, key: &str, secret: &str) -> Result<()> {
+    if !os_keyring_available() {
+        bail!(
+            "This build has no OS keyring backend (e.g. static musl Linux binaries ship without one). \
+             Use file-based credential storage instead of 'os-store'."
+        );
+    }
     let mut map = load_map(profile)?.unwrap_or_default();
     map.insert(key.to_string(), secret.to_string());
     save_map(profile, &map)
@@ -55,6 +74,16 @@ pub fn delete_profile(profile: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "windows",
+        all(target_os = "linux", not(target_env = "musl"))
+    ))]
+    fn os_keyring_available_when_backend_compiled() {
+        assert!(os_keyring_available());
+    }
 
     #[test]
     #[ignore = "requires a system keyring"]
