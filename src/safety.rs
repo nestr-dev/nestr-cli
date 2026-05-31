@@ -62,6 +62,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn write_verbs_are_sorted_for_binary_search() {
+        assert!(
+            WRITE_VERBS.is_sorted(),
+            "WRITE_VERBS must stay sorted or is_write_verb's binary_search breaks silently"
+        );
+    }
+
+    #[test]
     fn classifies_write_verbs() {
         assert!(is_write_verb("delete"));
         assert!(is_write_verb("update"));
