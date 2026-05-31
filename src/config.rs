@@ -204,6 +204,94 @@ pub fn list_profile_names() -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Bearer precedence: explicit flag > env var > profile value.
+pub fn resolve_bearer_precedence(
+    flag: Option<&str>,
+    env: Option<&str>,
+    profile_val: Option<&str>,
+) -> Option<String> {
+    flag.or(env).or(profile_val).map(|s| s.to_string())
+}
+
+/// Everything a command needs to talk to Nestr for one profile.
+#[derive(Debug, Clone)]
+pub struct ResolvedConfig {
+    pub profile_name: String,
+    pub bearer: String,
+    pub host: String,
+    pub api_base: String,
+    pub workspace_id: String,
+    pub output: OutputFormat,
+}
+
+/// Resolve the active profile into a ready-to-use config.
+/// `--api-key` / `NESTR_API_KEY` / `--host` overrides are applied.
+pub async fn resolve(
+    profile_override: Option<&str>,
+    api_key_flag: Option<&str>,
+    host_flag: Option<&str>,
+    output_flag: Option<OutputFormat>,
+) -> Result<ResolvedConfig> {
+    let global = load_config().unwrap_or_default();
+    let env_profile = std::env::var("NESTR_PROFILE").ok();
+    let name = profile_override
+        .map(str::to_string)
+        .or(env_profile)
+        .unwrap_or_else(|| global.default_profile.clone());
+
+    let mut profile = load_profile(&name)?;
+    if let Some(h) = host_flag {
+        profile.host = h.to_string();
+    }
+
+    let env_api_key = std::env::var("NESTR_API_KEY").ok();
+    let bearer = match profile.auth {
+        AuthKind::ApiKey => {
+            let profile_key = match profile.credential_storage {
+                CredentialStorage::OsStore => crate::keyring_store::get_secret(&name, "api_key")?,
+                CredentialStorage::File => profile.api_key.clone(),
+            };
+            resolve_bearer_precedence(api_key_flag, env_api_key.as_deref(), profile_key.as_deref())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("No API key for profile '{name}'. Run `nestr profiles add`.")
+                })?
+        }
+        AuthKind::OAuth => {
+            // A flag/env API key still overrides OAuth if explicitly provided.
+            if let Some(k) = resolve_bearer_precedence(api_key_flag, env_api_key.as_deref(), None) {
+                k
+            } else {
+                let (bearer, refreshed) = crate::oauth::resolve_token(
+                    &name,
+                    &profile.token_url(),
+                    &profile.client_id(),
+                    profile.credential_storage,
+                    profile.oauth_tokens.as_ref(),
+                )
+                .await?;
+                if let Some(new_tokens) = refreshed {
+                    profile.oauth_tokens = Some(new_tokens);
+                    save_profile(&name, &profile)?;
+                }
+                bearer
+            }
+        }
+    };
+
+    let output = output_flag
+        .or(profile.default_output_format)
+        .unwrap_or(global.default_output_format);
+
+    Ok(ResolvedConfig {
+        profile_name: name,
+        bearer,
+        host: profile.host.clone(),
+        api_base: profile.api_base(),
+        workspace_id: profile.workspace_id.clone(),
+        output,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +338,23 @@ mod tests {
             oauth_tokens: None,
             default_output_format: None,
         }
+    }
+
+    #[test]
+    fn precedence_flag_beats_env_beats_profile() {
+        assert_eq!(
+            resolve_bearer_precedence(Some("flag"), Some("env"), Some("prof")),
+            Some("flag".to_string())
+        );
+        assert_eq!(
+            resolve_bearer_precedence(None, Some("env"), Some("prof")),
+            Some("env".to_string())
+        );
+        assert_eq!(
+            resolve_bearer_precedence(None, None, Some("prof")),
+            Some("prof".to_string())
+        );
+        assert_eq!(resolve_bearer_precedence(None, None, None), None);
     }
 
     #[test]
