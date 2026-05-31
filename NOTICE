@@ -1,0 +1,6 @@
+nestr-cli
+Copyright 2026 Nestr
+
+This product includes software derived from the Coralogix CLI (cx-cli),
+Copyright 2026 Coralogix Ltd., licensed under the Apache License, Version 2.0
+(https://github.com/coralogix/cx-cli). The derived portions have been modified.
