@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use nestr_cli::commands::{auth, me, profiles};
+use nestr_cli::commands::{auth, me, profiles, search};
 use nestr_cli::config::OutputFormat;
 
 /// Nestr CLI — fast, composable access to Nestr for terminals and agents.
@@ -16,7 +16,10 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mauth\x1b[0m       Log in/out and check authentication status
   \x1b[1mprofiles\x1b[0m   Manage profiles (add, list, use, remove)
   \x1b[1mme\x1b[0m         Show the authenticated user
-  \x1b[1mversion\x1b[0m    Print the CLI version"
+  \x1b[1mversion\x1b[0m    Print the CLI version
+
+\x1b[1m\x1b[4mCore:\x1b[0m
+  \x1b[1msearch\x1b[0m     Search nests across the workspace"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -85,6 +88,8 @@ enum Commands {
     Me,
     /// Print the CLI version.
     Version,
+    /// Search nests in the workspace (or within a nest with --in).
+    Search(nestr_cli::commands::search::SearchArgs),
 }
 
 #[derive(Subcommand)]
@@ -146,6 +151,7 @@ async fn run() -> anyhow::Result<()> {
             ProfilesCmd::Remove { name } => profiles::run_remove(name, cli.yes),
         },
         Commands::Me => me::run(&g).await,
+        Commands::Search(args) => search::run(args, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
