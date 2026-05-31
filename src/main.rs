@@ -56,6 +56,15 @@ struct Cli {
     #[arg(long, global = true, help_heading = "Global Options")]
     yes: bool,
 
+    /// Block all write operations.
+    #[arg(
+        long,
+        global = true,
+        env = "NESTR_READ_ONLY",
+        help_heading = "Global Options"
+    )]
+    read_only: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -115,9 +124,14 @@ async fn main() {
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let profile = cli.profile.as_deref();
-    let api_key = cli.api_key.as_deref();
-    let host = cli.host.as_deref();
+    let g = nestr_cli::commands::GlobalArgs {
+        profile: cli.profile.clone(),
+        api_key: cli.api_key.clone(),
+        host: cli.host.clone(),
+        output: cli.output,
+        yes: cli.yes,
+        read_only: cli.read_only,
+    };
 
     match cli.command {
         Commands::Auth { cmd } => match cmd {
@@ -131,7 +145,7 @@ async fn run() -> anyhow::Result<()> {
             ProfilesCmd::Use { name } => profiles::run_use(name),
             ProfilesCmd::Remove { name } => profiles::run_remove(name, cli.yes),
         },
-        Commands::Me => me::run(profile, api_key, host, cli.output).await,
+        Commands::Me => me::run(&g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())

@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::api_client::NestrClient;
-use crate::config::{self, OutputFormat};
+use crate::commands::{resolve_client, GlobalArgs};
 use crate::render;
 
 /// GET /users/me — returns the raw user object.
@@ -11,14 +11,8 @@ pub async fn fetch_me(client: &NestrClient) -> crate::error::Result<Value> {
 }
 
 /// `nestr me` — resolve the active profile, fetch identity, render.
-pub async fn run(
-    profile: Option<&str>,
-    api_key: Option<&str>,
-    host: Option<&str>,
-    output: Option<OutputFormat>,
-) -> Result<()> {
-    let cfg = config::resolve(profile, api_key, host, output).await?;
-    let client = NestrClient::new(cfg.api_base.clone(), &cfg.bearer)?;
+pub async fn run(g: &GlobalArgs) -> Result<()> {
+    let (cfg, client) = resolve_client(g).await?;
     let me = fetch_me(&client).await?;
     render::render_object(&me, cfg.output, |v| {
         let name = v

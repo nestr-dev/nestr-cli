@@ -6,6 +6,7 @@ use inquire::Confirm;
 /// Sorted for binary_search.
 const WRITE_VERBS: &[&str] = &[
     "add",
+    "bulk-reorder",
     "create",
     "delete",
     "remove",
@@ -19,10 +20,11 @@ pub fn is_write_verb(name: &str) -> bool {
     WRITE_VERBS.binary_search(&name).is_ok()
 }
 
-/// Block writes when `--read-only` / `NESTR_READ_ONLY` is set.
-pub fn enforce_read_only(verb: &str) -> Result<()> {
-    if is_write_verb(verb) {
-        bail!("Write operation '{verb}' is blocked in read-only mode.");
+/// Block a write when read-only mode is on. Called by write commands, which know
+/// they're writes — no fragile name-matching.
+pub fn enforce_read_only(read_only: bool, action: &str) -> Result<()> {
+    if read_only {
+        bail!("Write operation '{action}' is blocked in read-only mode (--read-only / NESTR_READ_ONLY).");
     }
     Ok(())
 }
@@ -78,8 +80,8 @@ mod tests {
     }
 
     #[test]
-    fn read_only_blocks_writes_only() {
-        assert!(enforce_read_only("delete").is_err());
-        assert!(enforce_read_only("list").is_ok());
+    fn read_only_blocks_only_when_flag_set() {
+        assert!(enforce_read_only(true, "nests delete").is_err());
+        assert!(enforce_read_only(false, "nests delete").is_ok());
     }
 }
