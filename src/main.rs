@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    auth, comments, inbox, me, nests, notifications, plan, profiles, search,
+    auth, comments, inbox, labels, me, nests, notifications, plan, profiles, search,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -26,7 +26,8 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mcomments\x1b[0m   List, add, edit, delete comments
   \x1b[1minbox\x1b[0m      Capture and manage inbox items
   \x1b[1mplan\x1b[0m       Show/manage today's plan
-  \x1b[1mnotifications\x1b[0m  List and clear notifications"
+  \x1b[1mnotifications\x1b[0m  List and clear notifications
+  \x1b[1mlabels\x1b[0m     List labels; manage personal labels"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -122,6 +123,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::notifications::NotificationsCmd,
     },
+    /// Workspace and personal labels.
+    Labels {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::labels::LabelsCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -189,6 +195,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Inbox { cmd } => inbox::run(cmd, &g).await,
         Commands::Plan { cmd } => plan::run(cmd, &g).await,
         Commands::Notifications { cmd } => notifications::run(cmd, &g).await,
+        Commands::Labels { cmd } => labels::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())

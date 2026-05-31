@@ -4,7 +4,7 @@ pub mod profiles;
 // Uncommented by later tasks as each module is created:
 pub mod comments;
 pub mod inbox;
-// pub mod labels;
+pub mod labels;
 pub mod nests;
 pub mod notifications;
 pub mod plan;
