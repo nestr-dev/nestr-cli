@@ -1,13 +1,16 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::api_client::NestrClient;
+use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
 use crate::render;
 
-/// GET /users/me — returns the raw user object.
+/// GET /users/me — returns the user object. The live API wraps it in
+/// `{status, data}`, so unwrap defensively (unwrap_data is a no-op on a bare object).
 pub async fn fetch_me(client: &NestrClient) -> crate::error::Result<Value> {
-    client.get("/users/me", &[]).await
+    let raw: Value = client.get("/users/me", &[]).await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
 }
 
 /// `nestr me` — resolve the active profile, fetch identity, render.

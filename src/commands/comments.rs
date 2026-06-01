@@ -108,6 +108,19 @@ fn render_posts(data: &Value, output: crate::config::OutputFormat) -> Result<()>
     Ok(())
 }
 
+/// Render a single comment by its `body`. Comments store their text in `body`
+/// (title is null), so the generic nest-detail renderer would print a blank line.
+fn render_post_one(data: &Value, output: crate::config::OutputFormat) -> Result<()> {
+    match output {
+        crate::config::OutputFormat::Json => print_json(data)?,
+        crate::config::OutputFormat::Text => {
+            let p: PostView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", p.text(), p.id);
+        }
+    }
+    Ok(())
+}
+
 pub async fn run(cmd: CommentsCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
@@ -126,12 +139,12 @@ pub async fn run(cmd: CommentsCmd, g: &GlobalArgs) -> Result<()> {
         } => {
             safety::enforce_read_only(g.read_only, "comments add")?;
             let data = add_comment(&client, &nest_id, &body, &labels).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render_post_one(&data, cfg.output)?;
         }
         CommentsCmd::Edit { comment_id, body } => {
             safety::enforce_read_only(g.read_only, "comments edit")?;
             let data = edit_comment(&client, &comment_id, &body).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render_post_one(&data, cfg.output)?;
         }
         CommentsCmd::Delete { comment_id } => {
             safety::enforce_read_only(g.read_only, "comments delete")?;
