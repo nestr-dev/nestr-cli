@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    auth, circles, comments, inbox, labels, me, nests, notifications, plan, profiles, projects,
-    roles, search, users, work, workspaces,
+    auth, circles, comments, groups, inbox, labels, me, nests, notifications, plan, profiles,
+    projects, roles, search, users, work, workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -36,7 +36,8 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mworkspaces\x1b[0m List workspaces; manage apps
   \x1b[1mcircles\x1b[0m    List/manage circles + their roles/projects/posts
   \x1b[1mroles\x1b[0m      List/manage roles
-  \x1b[1musers\x1b[0m      List/manage workspace users (admin)"
+  \x1b[1musers\x1b[0m      List/manage workspace users (admin)
+  \x1b[1mgroups\x1b[0m     List/manage groups (admin)"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -164,6 +165,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::users::UsersCmd,
     },
+    /// Workspace groups.
+    Groups {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::groups::GroupsCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -238,6 +244,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Circles { cmd } => circles::run(cmd, &g).await,
         Commands::Roles { cmd } => roles::run(cmd, &g).await,
         Commands::Users { cmd } => users::run(cmd, &g).await,
+        Commands::Groups { cmd } => groups::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
