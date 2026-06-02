@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    auth, comments, inbox, labels, me, nests, notifications, plan, profiles, projects, search,
-    work, workspaces,
+    auth, circles, comments, inbox, labels, me, nests, notifications, plan, profiles, projects,
+    roles, search, work, workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -33,7 +33,9 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mwork\x1b[0m       Show open projects and todos
 
 \x1b[1m\x1b[4mOrg & People:\x1b[0m
-  \x1b[1mworkspaces\x1b[0m List workspaces; manage apps"
+  \x1b[1mworkspaces\x1b[0m List workspaces; manage apps
+  \x1b[1mcircles\x1b[0m    List/manage circles + their roles/projects/posts
+  \x1b[1mroles\x1b[0m      List/manage roles"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -146,6 +148,16 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::workspaces::WorkspacesCmd,
     },
+    /// Circles (governance) and their sub-resources.
+    Circles {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::circles::CirclesCmd,
+    },
+    /// Roles (governance).
+    Roles {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::roles::RolesCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -217,6 +229,8 @@ async fn run() -> anyhow::Result<()> {
         Commands::Projects { cmd } => projects::run(cmd, &g).await,
         Commands::Work => work::run(&g).await,
         Commands::Workspaces { cmd } => workspaces::run(cmd, &g).await,
+        Commands::Circles { cmd } => circles::run(cmd, &g).await,
+        Commands::Roles { cmd } => roles::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
