@@ -4,7 +4,7 @@ use serde_json::Value;
 use tabled::builder::Builder;
 
 use crate::config::OutputFormat;
-use crate::views::CompactNest;
+use crate::views::{AppView, CompactNest, GroupView, RoleView, UserView};
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
     Ok(serde_json::to_string_pretty(rows)?)
@@ -157,6 +157,114 @@ pub fn hint_line(data: &Value) -> Option<String> {
     find(data).map(|u| format!("next: {u}").dimmed().to_string())
 }
 
+/// Compact table for roles/circles. ACC/DOM are counts; full titles live in `role_detail`.
+pub fn role_table(roles: &[RoleView]) -> String {
+    let rows: Vec<Vec<String>> = roles
+        .iter()
+        .map(|r| {
+            vec![
+                r.id.clone(),
+                r.title.clone(),
+                r.acc_titles().len().to_string(),
+                r.domain_titles().len().to_string(),
+                r.labels_str(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "ACC", "DOM", "LABELS"], rows)
+}
+
+/// Render a list of roles/circles: raw JSON, or a compact table + footer.
+pub fn output_roles(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let roles: Vec<RoleView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if roles.is_empty() {
+                print_no_results("No results.");
+                return Ok(());
+            }
+            println!("{}", role_table(&roles));
+            if let Some(f) = pagination_footer(meta) {
+                println!("{f}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Detail block for a single role/circle, listing full accountability/domain titles.
+pub fn role_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let r: RoleView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", r.title, r.id);
+            if let Some(p) = r.purpose.as_deref().filter(|s| !s.is_empty()) {
+                println!("purpose: {p}");
+            }
+            if let Some(pid) = &r.parent_id {
+                println!("parent: {pid}");
+            }
+            let acc = r.acc_titles();
+            if !acc.is_empty() {
+                println!("accountabilities:");
+                for a in acc {
+                    println!("  - {a}");
+                }
+            }
+            let dom = r.domain_titles();
+            if !dom.is_empty() {
+                println!("domains:");
+                for d in dom {
+                    println!("  - {d}");
+                }
+            }
+            if !r.labels.is_empty() {
+                println!("labels: {}", r.labels_str());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn user_table(users: &[UserView]) -> String {
+    let rows: Vec<Vec<String>> = users
+        .iter()
+        .map(|u| {
+            vec![
+                u.id.clone(),
+                u.username.clone().unwrap_or_default(),
+                u.full_name(),
+                if u.bot == Some(true) { "bot" } else { "" }.to_string(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "USERNAME", "NAME", "BOT"], rows)
+}
+
+pub fn group_table(groups: &[GroupView]) -> String {
+    let rows: Vec<Vec<String>> = groups
+        .iter()
+        .map(|g| vec![g.id.clone(), g.name.clone().unwrap_or_default()])
+        .collect();
+    format_table(&["ID", "NAME"], rows)
+}
+
+pub fn app_table(apps: &[AppView]) -> String {
+    let rows: Vec<Vec<String>> = apps
+        .iter()
+        .map(|a| {
+            vec![
+                a.id.clone(),
+                a.title.clone().unwrap_or_default(),
+                if a.enabled { "✓" } else { "" }.to_string(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "ENABLED"], rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +335,33 @@ mod tests {
         let data = json!([{"_id":"a","hints":[{"url":"/nests/a/children?search=x"}]}]);
         let line = hint_line(&data).unwrap();
         assert!(line.contains("/nests/a/children?search=x"));
+    }
+
+    #[test]
+    fn role_table_shows_counts_and_title() {
+        use crate::views::RoleView;
+        let r: RoleView = serde_json::from_value(json!({
+            "_id": "r1", "title": "Lead", "labels": ["role"],
+            "accountabilities": [{"title": "x"}, {"title": "y"}], "domains": [{"title": "z"}]
+        }))
+        .unwrap();
+        let out = role_table(&[r]);
+        assert!(out.contains("Lead") && out.contains("r1"));
+        assert!(out.contains('2') && out.contains('1')); // 2 acc, 1 dom
+    }
+
+    #[test]
+    fn user_and_group_and_app_tables_render() {
+        use crate::views::{AppView, GroupView, UserView};
+        let u: UserView = serde_json::from_value(
+            json!({"_id":"u1","username":"a@b.c","profile":{"fullName":"A B"}}),
+        )
+        .unwrap();
+        assert!(user_table(&[u]).contains("a@b.c"));
+        let g: GroupView = serde_json::from_value(json!({"_id":"g1","name":"leads"})).unwrap();
+        assert!(group_table(&[g]).contains("leads"));
+        let a: AppView =
+            serde_json::from_value(json!({"_id":"okr","title":"OKR","enabled":true})).unwrap();
+        assert!(app_table(&[a]).contains("OKR"));
     }
 }
