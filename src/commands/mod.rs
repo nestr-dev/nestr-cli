@@ -11,6 +11,7 @@ pub mod plan;
 pub mod projects;
 pub mod search;
 pub mod work;
+pub mod workspaces;
 
 use anyhow::Result;
 
