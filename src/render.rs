@@ -193,6 +193,22 @@ pub fn output_roles(data: &Value, meta: Option<&Value>, output: OutputFormat) ->
     Ok(())
 }
 
+/// Strip HTML tags and collapse whitespace from rich-text titles for terminal display.
+/// Accountability/domain titles can be HTML that the server's `cleanText` doesn't touch.
+fn strip_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Detail block for a single role/circle, listing full accountability/domain titles.
 pub fn role_detail(data: &Value, output: OutputFormat) -> Result<()> {
     match output {
@@ -210,14 +226,14 @@ pub fn role_detail(data: &Value, output: OutputFormat) -> Result<()> {
             if !acc.is_empty() {
                 println!("accountabilities:");
                 for a in acc {
-                    println!("  - {a}");
+                    println!("  - {}", strip_html(&a));
                 }
             }
             let dom = r.domain_titles();
             if !dom.is_empty() {
                 println!("domains:");
                 for d in dom {
-                    println!("  - {d}");
+                    println!("  - {}", strip_html(&d));
                 }
             }
             if !r.labels.is_empty() {
@@ -348,6 +364,15 @@ mod tests {
         let out = role_table(&[r]);
         assert!(out.contains("Lead") && out.contains("r1"));
         assert!(out.contains('2') && out.contains('1')); // 2 acc, 1 dom
+    }
+
+    #[test]
+    fn strip_html_removes_tags_and_collapses_whitespace() {
+        assert_eq!(
+            strip_html("<div><div>Hello   world</div></div>"),
+            "Hello world"
+        );
+        assert_eq!(strip_html("plain"), "plain");
     }
 
     #[test]
