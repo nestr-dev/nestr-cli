@@ -12,6 +12,7 @@ pub mod plan;
 pub mod projects;
 pub mod roles;
 pub mod search;
+pub mod users;
 pub mod work;
 pub mod workspaces;
 
