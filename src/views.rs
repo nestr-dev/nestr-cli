@@ -97,6 +97,110 @@ pub struct LabelView {
     pub icon: Option<String>,
 }
 
+/// Extract display titles from an `accountabilities`/`domains` array, whose items
+/// are either `{_id, title}` objects or bare strings.
+pub fn view_titles(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(_) => i.get("title").and_then(|v| v.as_str()).map(str::to_string),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A role or a circle: a Nest plus `accountabilities[]` and `domains[]`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RoleView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub purpose: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default, rename = "parentId")]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub accountabilities: Vec<Value>,
+    #[serde(default)]
+    pub domains: Vec<Value>,
+}
+
+impl RoleView {
+    pub fn labels_str(&self) -> String {
+        self.labels
+            .iter()
+            .filter_map(|l| match l {
+                Value::String(s) => Some(s.clone()),
+                Value::Object(_) => l
+                    .get("code")
+                    .or_else(|| l.get("title"))
+                    .or_else(|| l.get("_id"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+    pub fn acc_titles(&self) -> Vec<String> {
+        view_titles(&self.accountabilities)
+    }
+    pub fn domain_titles(&self) -> Vec<String> {
+        view_titles(&self.domains)
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserProfile {
+    #[serde(default, rename = "fullName")]
+    pub full_name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub profile: Option<UserProfile>,
+    #[serde(default)]
+    pub bot: Option<bool>,
+}
+
+impl UserView {
+    pub fn full_name(&self) -> String {
+        self.profile
+            .as_ref()
+            .and_then(|p| p.full_name.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GroupView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AppView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +231,35 @@ mod tests {
         assert_eq!(p.text(), "t");
         let p: PostView = serde_json::from_value(json!({"body":"b","title":"t"})).unwrap();
         assert_eq!(p.text(), "b");
+    }
+
+    #[test]
+    fn role_view_extracts_accountability_and_domain_titles() {
+        let r: RoleView = serde_json::from_value(json!({
+            "_id": "r1", "title": "Facilitator", "labels": ["role"],
+            "accountabilities": [{"_id": "a1", "title": "Run meetings"}, "Keep records"],
+            "domains": [{"_id": "d1", "title": "The agenda"}]
+        }))
+        .unwrap();
+        assert_eq!(r.acc_titles(), vec!["Run meetings", "Keep records"]);
+        assert_eq!(r.domain_titles(), vec!["The agenda"]);
+        assert_eq!(r.labels_str(), "role");
+    }
+
+    #[test]
+    fn user_view_pulls_full_name_and_tolerates_missing_profile() {
+        let u: UserView = serde_json::from_value(
+            json!({"_id": "u1", "username": "a@b.c", "profile": {"fullName": "A B"}}),
+        )
+        .unwrap();
+        assert_eq!(u.full_name(), "A B");
+        let u2: UserView = serde_json::from_value(json!({"_id": "u2"})).unwrap();
+        assert_eq!(u2.full_name(), "");
+    }
+
+    #[test]
+    fn app_view_defaults_enabled_false() {
+        let a: AppView = serde_json::from_value(json!({"_id": "okr", "title": "OKR"})).unwrap();
+        assert!(!a.enabled);
     }
 }
