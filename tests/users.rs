@@ -71,3 +71,24 @@ async fn groups_set_sends_bare_name_array() {
         .unwrap();
     assert!(data.is_array());
 }
+
+#[tokio::test]
+async fn update_sends_profile_full_name_and_email() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/workspaces/ws1/users/u1"))
+        .and(body_json(
+            serde_json::json!({"profile":{"fullName":"New Name","email":"new@b.c"}}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"u1","username":"new@b.c"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = serde_json::json!({"profile":{"fullName":"New Name","email":"new@b.c"}});
+    let data = users::update_user(&client, "ws1", "u1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "u1");
+}

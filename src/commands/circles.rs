@@ -281,3 +281,17 @@ pub async fn run(cmd: CirclesCmd, g: &GlobalArgs) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_params_only_in_text_mode() {
+        assert_eq!(
+            clean_params(OutputFormat::Text),
+            vec![("cleanText", "true")]
+        );
+        assert!(clean_params(OutputFormat::Json).is_empty());
+    }
+}

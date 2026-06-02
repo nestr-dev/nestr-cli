@@ -70,3 +70,24 @@ async fn posts_subresource_hits_path() {
         .unwrap();
     assert_eq!(data[0]["_id"], "p1");
 }
+
+#[tokio::test]
+async fn update_replaces_accountabilities_and_domains() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/workspaces/ws1/circles/c1"))
+        .and(body_json(serde_json::json!({
+            "accountabilities":["New acc"],"domains":["New domain"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"c1","title":"General"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = serde_json::json!({"accountabilities":["New acc"],"domains":["New domain"]});
+    let data = circles::update_circle(&client, "ws1", "c1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "c1");
+}
