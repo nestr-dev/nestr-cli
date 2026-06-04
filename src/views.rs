@@ -295,6 +295,42 @@ pub struct ChildView {
     pub link_id: Option<String>,
 }
 
+/// A graph-link edge: the linked nest, annotated with its relation + direction.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LinkView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default)]
+    pub relation: Option<String>,
+    #[serde(default)]
+    pub direction: Option<String>,
+}
+
+/// An organizational-health metric (insight).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct InsightView {
+    #[serde(default, rename = "nestId")]
+    pub nest_id: Option<String>,
+    #[serde(default, rename = "type")]
+    pub type_: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, rename = "currentValue")]
+    pub current_value: Option<f64>,
+    #[serde(default, rename = "compareValue")]
+    pub compare_value: Option<f64>,
+    #[serde(default, rename = "dataType")]
+    pub data_type: Option<String>,
+    #[serde(default)]
+    pub goal: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +415,31 @@ mod tests {
         assert_eq!(c.variable, "role.title");
         assert_eq!(c.new_value, json!("Treasurer"));
         assert!(c.old_value.is_null());
+    }
+
+    #[test]
+    fn link_view_reads_relation_and_direction() {
+        let l: LinkView = serde_json::from_value(json!({
+            "_id":"n1","title":"Weekly meeting","labels":["meeting"],
+            "relation":"meeting","direction":"outgoing"
+        }))
+        .unwrap();
+        assert_eq!(l.id, "n1");
+        assert_eq!(l.relation.as_deref(), Some("meeting"));
+        assert_eq!(l.direction.as_deref(), Some("outgoing"));
+    }
+
+    #[test]
+    fn insight_view_reads_numbers_and_renames_type() {
+        let i: InsightView = serde_json::from_value(json!({
+            "type":"role_count","title":"Roles","currentValue":12,"compareValue":10.0,"goal":"high"
+        }))
+        .unwrap();
+        assert_eq!(i.type_.as_deref(), Some("role_count"));
+        assert_eq!(i.current_value, Some(12.0));
+        assert_eq!(i.compare_value, Some(10.0));
+        let empty: InsightView = serde_json::from_value(json!({})).unwrap();
+        assert!(empty.current_value.is_none());
     }
 
     #[test]
