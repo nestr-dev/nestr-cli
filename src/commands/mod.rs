@@ -7,6 +7,7 @@ pub mod comments;
 pub mod groups;
 pub mod inbox;
 pub mod labels;
+pub mod links;
 pub mod nests;
 pub mod notifications;
 pub mod plan;
