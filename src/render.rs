@@ -4,7 +4,10 @@ use serde_json::Value;
 use tabled::builder::Builder;
 
 use crate::config::OutputFormat;
-use crate::views::{AppView, CompactNest, GroupView, RoleView, UserView};
+use crate::views::{
+    AppView, ChangeView, ChildView, CompactNest, GroupView, PartView, RoleView, StatusView,
+    TensionView, UserView,
+};
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
     Ok(serde_json::to_string_pretty(rows)?)
@@ -281,6 +284,198 @@ pub fn app_table(apps: &[AppView]) -> String {
     format_table(&["ID", "TITLE", "ENABLED"], rows)
 }
 
+/// Compact table for tensions.
+pub fn tension_table(tensions: &[TensionView]) -> String {
+    let rows: Vec<Vec<String>> = tensions
+        .iter()
+        .map(|t| {
+            vec![
+                t.id.clone(),
+                t.title.clone(),
+                t.status.clone().unwrap_or_default(),
+                crate::views::join_labels(&t.labels),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "STATUS", "LABELS"], rows)
+}
+
+pub fn output_tensions(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let ts: Vec<TensionView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if ts.is_empty() {
+                print_no_results("No tensions.");
+                return Ok(());
+            }
+            println!("{}", tension_table(&ts));
+            if let Some(f) = pagination_footer(meta) {
+                println!("{f}");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn tension_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let t: TensionView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", t.title, t.id);
+            if let Some(s) = &t.status {
+                println!("status: {s}");
+            }
+            if let Some(d) = t.description.as_deref().filter(|s| !s.is_empty()) {
+                println!("description: {}", strip_html(d));
+            }
+            for (label, key) in [("feeling", "tension.feeling"), ("needs", "tension.needs")] {
+                if let Some(v) = data
+                    .get("fields")
+                    .and_then(|f| f.get(key))
+                    .and_then(Value::as_str)
+                {
+                    if !v.is_empty() {
+                        println!("{label}: {}", strip_html(v));
+                    }
+                }
+            }
+            if !t.labels.is_empty() {
+                println!("labels: {}", crate::views::join_labels(&t.labels));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One row per part, summarising its primary proposal item (`items[0]`).
+pub fn output_parts(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let parts: Vec<PartView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if parts.is_empty() {
+                print_no_results("No parts.");
+                return Ok(());
+            }
+            let rows: Vec<Vec<String>> = parts
+                .iter()
+                .map(|p| {
+                    let item = p.items.first();
+                    let action = item
+                        .and_then(|i| i.get("action"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("-")
+                        .to_string();
+                    let title = item
+                        .and_then(|i| i.get("title"))
+                        .and_then(Value::as_str)
+                        .map(strip_html)
+                        .or_else(|| p.title.clone())
+                        .unwrap_or_default();
+                    let labels = item
+                        .and_then(|i| i.get("labels"))
+                        .and_then(|l| l.as_array())
+                        .map(|a| crate::views::join_labels(a))
+                        .unwrap_or_default();
+                    vec![p.id.clone(), action, title, labels]
+                })
+                .collect();
+            println!(
+                "{}",
+                format_table(&["PART", "ACTION", "TITLE", "LABELS"], rows)
+            );
+        }
+    }
+    Ok(())
+}
+
+fn value_display(v: &Value) -> String {
+    match v {
+        Value::Null => "—".to_string(),
+        Value::String(s) => strip_html(s),
+        other => other.to_string(),
+    }
+}
+
+pub fn changes_table(changes: &[ChangeView]) -> String {
+    let rows: Vec<Vec<String>> = changes
+        .iter()
+        .map(|c| {
+            vec![
+                c.variable.clone(),
+                value_display(&c.old_value),
+                value_display(&c.new_value),
+            ]
+        })
+        .collect();
+    format_table(&["VARIABLE", "OLD", "NEW"], rows)
+}
+
+pub fn output_changes(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let changes: Vec<ChangeView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if changes.is_empty() {
+                print_no_results("No changes.");
+                return Ok(());
+            }
+            println!("{}", changes_table(&changes));
+        }
+    }
+    Ok(())
+}
+
+pub fn output_status(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let s: StatusView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("status: {}", s.status.as_deref().unwrap_or("-"));
+            for r in &s.responses {
+                println!(
+                    "  {}: {} {}",
+                    r.user_id.as_deref().unwrap_or("-"),
+                    r.response.as_deref().unwrap_or("none"),
+                    r.voted_at.as_deref().unwrap_or("")
+                );
+            }
+            if let Some(a) = &s.autoapprove {
+                println!("autoapprove: {a}");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn output_children(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let children: Vec<ChildView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if children.is_empty() {
+                print_no_results("No children.");
+                return Ok(());
+            }
+            let rows: Vec<Vec<String>> = children
+                .iter()
+                .map(|c| {
+                    vec![
+                        c.id.clone(),
+                        c.title.clone().map(|t| strip_html(&t)).unwrap_or_default(),
+                        crate::views::join_labels(&c.labels),
+                        c.link_id.clone().unwrap_or_default(),
+                    ]
+                })
+                .collect();
+            println!("{}", format_table(&["ID", "TITLE", "LABEL", "LINK"], rows));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +583,26 @@ mod tests {
         let a: AppView =
             serde_json::from_value(json!({"_id":"okr","title":"OKR","enabled":true})).unwrap();
         assert!(app_table(&[a]).contains("OKR"));
+    }
+
+    #[test]
+    fn tension_table_shows_status() {
+        use crate::views::TensionView;
+        let t: TensionView =
+            serde_json::from_value(json!({"_id":"t1","title":"Gap","status":"draft","labels":[]}))
+                .unwrap();
+        let out = tension_table(&[t]);
+        assert!(out.contains("Gap") && out.contains("draft") && out.contains("t1"));
+    }
+
+    #[test]
+    fn changes_table_renders_old_arrow_new() {
+        use crate::views::ChangeView;
+        let c: ChangeView = serde_json::from_value(
+            json!({"variable":"role.title","newValue":"New","oldValue":null}),
+        )
+        .unwrap();
+        let out = changes_table(&[c]);
+        assert!(out.contains("role.title") && out.contains("New"));
     }
 }
