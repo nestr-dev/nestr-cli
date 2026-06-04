@@ -2,7 +2,7 @@
 
 A fast, composable command-line interface for [Nestr](https://nestr.io), for terminal users and AI agents.
 
-> Status: Phase 1 (core daily driver) — auth, profiles, and the everyday command loop (search, nests, comments, inbox, plan, notifications, labels, projects, work). See `docs/superpowers/specs/` for the design and roadmap.
+> Status: Phase 3 (governance) — auth/profiles, the everyday loop, org & people, and governance tensions (propose → consent → enact). See `docs/superpowers/specs/` for the design and roadmap.
 
 ## Install (from source)
 
@@ -36,6 +36,9 @@ Add `-o json` to any command for raw JSON, `--read-only` to block writes, and
 This repo ships a `nestr-basics` skill (`skills/nestr-basics/SKILL.md`) covering
 the everyday command loop. It is authored as a plain `SKILL.md` so the hosted
 Nestr MCP can consume the same file over time.
+
+A `nestr-governance` skill (`skills/nestr-governance/SKILL.md`) covers the tension
+workflow: propose, review changes, submit for consent, and vote.
 
 ## License
 
