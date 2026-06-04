@@ -4,6 +4,7 @@ pub mod profiles;
 // Uncommented by later tasks as each module is created:
 pub mod circles;
 pub mod comments;
+pub mod export;
 pub mod groups;
 pub mod inbox;
 pub mod insights;

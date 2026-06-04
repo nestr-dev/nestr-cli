@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    auth, circles, comments, groups, inbox, insights, labels, links, me, nests, notifications,
-    plan, profiles, projects, roles, search, tensions, users, work, workspaces,
+    auth, circles, comments, export, groups, inbox, insights, labels, links, me, nests,
+    notifications, plan, profiles, projects, roles, search, tensions, users, work, workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -44,7 +44,8 @@ use nestr_cli::config::OutputFormat;
 
 \x1b[1m\x1b[4mGraph & Insights:\x1b[0m
   \x1b[1mlinks\x1b[0m      List/add/remove graph links
-  \x1b[1minsights\x1b[0m   Organizational health metrics (BETA)"
+  \x1b[1minsights\x1b[0m   Organizational health metrics (BETA)
+  \x1b[1mexport\x1b[0m     Dump governance/work as JSON"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -192,6 +193,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::insights::InsightsCmd,
     },
+    /// Export governance/work as JSON.
+    Export {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::export::ExportCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -270,6 +276,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Tensions { cmd } => tensions::run(cmd, &g).await,
         Commands::Links { cmd } => links::run(cmd, &g).await,
         Commands::Insights { cmd } => insights::run(cmd, &g).await,
+        Commands::Export { cmd } => export::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
