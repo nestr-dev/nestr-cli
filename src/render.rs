@@ -395,6 +395,7 @@ fn value_display(v: &Value) -> String {
     match v {
         Value::Null => "—".to_string(),
         Value::String(s) => strip_html(s),
+        Value::Array(a) => a.iter().map(value_display).collect::<Vec<_>>().join(", "),
         other => other.to_string(),
     }
 }
@@ -604,5 +605,16 @@ mod tests {
         .unwrap();
         let out = changes_table(&[c]);
         assert!(out.contains("role.title") && out.contains("New"));
+    }
+
+    #[test]
+    fn changes_table_joins_array_values_without_brackets() {
+        use crate::views::ChangeView;
+        let c: ChangeView = serde_json::from_value(
+            json!({"variable":"circle.labels","newValue":["circle"],"oldValue":["role"]}),
+        )
+        .unwrap();
+        let out = changes_table(&[c]);
+        assert!(out.contains("circle") && out.contains("role") && !out.contains('['));
     }
 }

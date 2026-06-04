@@ -365,6 +365,15 @@ fn clean_params(output: OutputFormat) -> Vec<(&'static str, &'static str)> {
     }
 }
 
+/// Map a `vote` decision to the status state the API expects.
+fn vote_state(decision: &str) -> &'static str {
+    if decision == "accept" {
+        "accepted"
+    } else {
+        "escalated"
+    }
+}
+
 pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
@@ -487,12 +496,7 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
             decision,
         } => {
             safety::enforce_read_only(g.read_only, "tensions vote")?;
-            let state = if decision == "accept" {
-                "accepted"
-            } else {
-                "escalated"
-            };
-            let data = set_status(&client, &nest_id, &tension_id, state).await?;
+            let data = set_status(&client, &nest_id, &tension_id, vote_state(&decision)).await?;
             render::output_status(&data, cfg.output)?;
         }
         TensionsCmd::Parts { cmd } => run_parts(cmd, &cfg, &client, g).await?,
@@ -932,4 +936,15 @@ async fn run_children(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vote_state_maps_decision() {
+        assert_eq!(vote_state("accept"), "accepted");
+        assert_eq!(vote_state("escalate"), "escalated");
+    }
 }

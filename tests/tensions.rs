@@ -151,3 +151,72 @@ async fn child_add_posts_title_and_label() {
         .unwrap();
     assert_eq!(data["_id"], "ch9");
 }
+
+#[tokio::test]
+async fn set_status_patches_status_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/c1/tensions/t1/status"))
+        .and(body_json(serde_json::json!({"status":"proposed"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"status":"proposed"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = tensions::set_status(&client, "c1", "t1", "proposed")
+        .await
+        .unwrap();
+    assert_eq!(data["status"], "proposed");
+}
+
+#[tokio::test]
+async fn awaiting_consent_hits_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me/tensions/awaiting-my-consent"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":[{"_id":"t5","title":"Vote me"}]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let (data, _) = tensions::fetch_awaiting(&client, &[]).await.unwrap();
+    assert_eq!(data[0]["_id"], "t5");
+}
+
+#[tokio::test]
+async fn child_update_patches_child_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/c1/tensions/t1/parts/p1/children/ch1"))
+        .and(body_json(serde_json::json!({"title":"Renamed"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"ch1","title":"Renamed"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = serde_json::json!({"title":"Renamed"});
+    let data = tensions::update_child(&client, "c1", "t1", "p1", "ch1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["title"], "Renamed");
+}
+
+#[tokio::test]
+async fn child_delete_hits_child_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/nests/c1/tensions/t1/parts/p1/children/ch1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"message":"Child deleted","childId":"ch1"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = tensions::delete_child(&client, "c1", "t1", "p1", "ch1")
+        .await
+        .unwrap();
+    assert_eq!(data["childId"], "ch1");
+}
