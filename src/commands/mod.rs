@@ -6,6 +6,7 @@ pub mod circles;
 pub mod comments;
 pub mod groups;
 pub mod inbox;
+pub mod insights;
 pub mod labels;
 pub mod links;
 pub mod nests;
