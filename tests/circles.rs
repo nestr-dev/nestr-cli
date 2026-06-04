@@ -91,3 +91,20 @@ async fn update_replaces_accountabilities_and_domains() {
         .unwrap();
     assert_eq!(data["_id"], "c1");
 }
+
+#[tokio::test]
+async fn tensions_subresource_hits_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/ws1/circles/c1/tensions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":[{"_id":"t1","title":"Gap"}]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let (data, _) = circles::fetch_tensions(&client, "ws1", "c1", &[])
+        .await
+        .unwrap();
+    assert_eq!(data[0]["_id"], "t1");
+}

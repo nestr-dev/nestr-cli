@@ -60,6 +60,8 @@ pub enum CirclesCmd {
         #[arg(long)]
         depth: Option<String>,
     },
+    /// List a circle's tensions.
+    Tensions { id: String },
 }
 
 pub async fn fetch_list(
@@ -149,6 +151,19 @@ pub async fn fetch_posts(
         .await?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
+}
+
+pub async fn fetch_tensions(
+    client: &NestrClient,
+    ws: &str,
+    id: &str,
+    params: &[(&str, &str)],
+) -> crate::error::Result<(Value, Option<Value>)> {
+    let raw: Value = client
+        .get(&format!("/workspaces/{ws}/circles/{id}/tensions"), params)
+        .await?;
+    let (data, meta, _) = unwrap_data(raw);
+    Ok((data, meta))
 }
 
 /// Insert accountabilities/domains string arrays into a body map if non-empty.
@@ -277,6 +292,10 @@ pub async fn run(cmd: CirclesCmd, g: &GlobalArgs) -> Result<()> {
             }
             let data = fetch_posts(&client, &ws, &id, &params).await?;
             render_posts(&data, cfg.output)?;
+        }
+        CirclesCmd::Tensions { id } => {
+            let (data, meta) = fetch_tensions(&client, &ws, &id, &clean_params(cfg.output)).await?;
+            render::output_tensions(&data, meta.as_ref(), cfg.output)?;
         }
     }
     Ok(())
