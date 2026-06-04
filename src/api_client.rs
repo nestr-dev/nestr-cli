@@ -91,6 +91,11 @@ impl NestrClient {
         self.request(Method::DELETE, path, &[], None).await
     }
 
+    /// DELETE with a JSON body (e.g. propose-delete sends `{_id}`).
+    pub async fn delete_body<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
+        self.request(Method::DELETE, path, &[], Some(body)).await
+    }
+
     /// Single code path for all verbs. On a 403 with a refresh context, refresh
     /// the token once and retry; a still-403 falls through to the error mapping.
     async fn request<T: DeserializeOwned>(

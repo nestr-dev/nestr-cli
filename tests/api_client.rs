@@ -72,3 +72,28 @@ async fn patch_handles_empty_204_body() {
         .unwrap();
     assert_eq!(v, serde_json::json!({}));
 }
+
+#[tokio::test]
+async fn delete_body_sends_json_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/nests/x/tensions/t/parts"))
+        .and(wiremock::matchers::body_json(
+            serde_json::json!({"_id":"r1"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"status":"ok","data":{"ok":true}})),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let v: serde_json::Value = client
+        .delete_body(
+            "/nests/x/tensions/t/parts",
+            &serde_json::json!({"_id":"r1"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(v["status"], "ok");
+}
