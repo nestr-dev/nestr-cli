@@ -201,6 +201,100 @@ pub struct AppView {
     pub enabled: bool,
 }
 
+/// Join label identifiers for display (handles `["code"]` and `[{code|title|_id}]`).
+pub fn join_labels(labels: &[Value]) -> String {
+    labels
+        .iter()
+        .filter_map(|l| match l {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(_) => l
+                .get("code")
+                .or_else(|| l.get("title"))
+                .or_else(|| l.get("_id"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A tension: a Nest with a computed `status`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TensionView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default, rename = "parentId")]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub completed: Option<bool>,
+}
+
+/// A proposal part: contains one or more proposal items.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PartView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub items: Vec<Value>,
+}
+
+/// One line of a computed diff for a proposal part.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ChangeView {
+    #[serde(default, rename = "nestId")]
+    pub nest_id: Option<String>,
+    #[serde(default)]
+    pub variable: String,
+    #[serde(default, rename = "newValue")]
+    pub new_value: Value,
+    #[serde(default, rename = "oldValue")]
+    pub old_value: Value,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct StatusResponse {
+    #[serde(default, rename = "userId")]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub response: Option<String>,
+    #[serde(default, rename = "votedAt")]
+    pub voted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct StatusView {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub responses: Vec<StatusResponse>,
+    #[serde(default)]
+    pub autoapprove: Option<String>,
+}
+
+/// An accountability/domain child of a proposal part.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ChildView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default, rename = "linkId")]
+    pub link_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +355,41 @@ mod tests {
     fn app_view_defaults_enabled_false() {
         let a: AppView = serde_json::from_value(json!({"_id": "okr", "title": "OKR"})).unwrap();
         assert!(!a.enabled);
+    }
+
+    #[test]
+    fn tension_view_reads_status_and_tolerates_missing() {
+        let t: TensionView = serde_json::from_value(
+            json!({"_id":"t1","title":"Gap","labels":["circleplus-prepared-tension"],"status":"proposed"}),
+        )
+        .unwrap();
+        assert_eq!(t.id, "t1");
+        assert_eq!(t.status.as_deref(), Some("proposed"));
+        let t2: TensionView = serde_json::from_value(json!({"_id":"t2","title":"x"})).unwrap();
+        assert!(t2.status.is_none());
+        assert_eq!(join_labels(&t.labels), "circleplus-prepared-tension");
+    }
+
+    #[test]
+    fn change_view_tolerates_null_old_new() {
+        let c: ChangeView = serde_json::from_value(
+            json!({"variable":"role.title","newValue":"Treasurer","oldValue":null}),
+        )
+        .unwrap();
+        assert_eq!(c.variable, "role.title");
+        assert_eq!(c.new_value, json!("Treasurer"));
+        assert!(c.old_value.is_null());
+    }
+
+    #[test]
+    fn status_view_reads_responses() {
+        let s: StatusView = serde_json::from_value(json!({
+            "status":"proposed",
+            "responses":[{"userId":"u1","response":"accepted","votedAt":"2026-06-04T00:00:00Z"}]
+        }))
+        .unwrap();
+        assert_eq!(s.status.as_deref(), Some("proposed"));
+        assert_eq!(s.responses.len(), 1);
+        assert_eq!(s.responses[0].user_id.as_deref(), Some("u1"));
     }
 }
