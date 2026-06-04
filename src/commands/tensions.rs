@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
 use crate::config::{OutputFormat, ResolvedConfig};
-use crate::{render, safety};
+use crate::{render, safety, validation};
 
 #[derive(Subcommand)]
 pub enum TensionsCmd {
@@ -500,12 +500,307 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
     Ok(())
 }
 
-// Parts dispatch is implemented in Task 4; stub returns until then.
+// ---- Parts API helpers ----
+
+pub async fn fetch_parts(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .get(&format!("{}/parts", base(nest, tid)), &[])
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn add_part(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .post(&format!("{}/parts", base(nest, tid)), body)
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn modify_part(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(&format!("{}/parts/{part}", base(nest, tid)), body)
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn remove_part(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .delete(&format!("{}/parts/{part}", base(nest, tid)))
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn propose_update(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(&format!("{}/parts", base(nest, tid)), body)
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn propose_delete(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    item_id: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .delete_body(
+            &format!("{}/parts", base(nest, tid)),
+            &serde_json::json!({ "_id": item_id }),
+        )
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn fetch_changes(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .get(&format!("{}/parts/{part}/changes", base(nest, tid)), &[])
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+/// Shared body builder for part add/modify/propose-update.
+/// Caller inserts `_id` for propose-update.
+#[allow(clippy::too_many_arguments)]
+fn part_body(
+    title: Option<String>,
+    purpose: Option<String>,
+    description: Option<String>,
+    label: Option<String>,
+    parent: Option<String>,
+    accountabilities: &[String],
+    domains: &[String],
+    users: &[String],
+    due: Option<String>,
+) -> Map<String, Value> {
+    let mut body = Map::new();
+    if let Some(t) = title {
+        body.insert("title".into(), t.into());
+    }
+    if let Some(p) = purpose {
+        body.insert("purpose".into(), p.into());
+    }
+    if let Some(d) = description {
+        body.insert("description".into(), d.into());
+    }
+    if let Some(l) = label {
+        body.insert("labels".into(), Value::Array(vec![l.into()]));
+    }
+    if let Some(p) = parent {
+        body.insert("parentId".into(), p.into());
+    }
+    if !accountabilities.is_empty() {
+        body.insert(
+            "accountabilities".into(),
+            Value::Array(accountabilities.iter().map(|s| s.clone().into()).collect()),
+        );
+    }
+    if !domains.is_empty() {
+        body.insert(
+            "domains".into(),
+            Value::Array(domains.iter().map(|s| s.clone().into()).collect()),
+        );
+    }
+    if !users.is_empty() {
+        body.insert(
+            "users".into(),
+            Value::Array(users.iter().map(|s| s.clone().into()).collect()),
+        );
+    }
+    if let Some(d) = due {
+        body.insert("due".into(), d.into());
+    }
+    body
+}
+
 async fn run_parts(
-    _cmd: PartsCmd,
+    cmd: PartsCmd,
+    cfg: &ResolvedConfig,
+    client: &NestrClient,
+    g: &GlobalArgs,
+) -> Result<()> {
+    match cmd {
+        PartsCmd::List {
+            nest_id,
+            tension_id,
+        } => {
+            let data = fetch_parts(client, &nest_id, &tension_id).await?;
+            render::output_parts(&data, cfg.output)?;
+        }
+        PartsCmd::Add {
+            nest_id,
+            tension_id,
+            title,
+            label,
+            purpose,
+            description,
+            parent,
+            accountabilities,
+            domains,
+            users,
+            due,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts add")?;
+            validation::validate_prime_labels(std::slice::from_ref(&label))?;
+            let body = part_body(
+                Some(title),
+                purpose,
+                description,
+                Some(label),
+                parent,
+                &accountabilities,
+                &domains,
+                &users,
+                due,
+            );
+            let data = add_part(client, &nest_id, &tension_id, &Value::Object(body)).await?;
+            render::output_parts(&Value::Array(vec![data]), cfg.output)?;
+        }
+        PartsCmd::Modify {
+            nest_id,
+            tension_id,
+            part_id,
+            title,
+            purpose,
+            description,
+            label,
+            parent,
+            accountabilities,
+            domains,
+            users,
+            due,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts modify")?;
+            let body = part_body(
+                title,
+                purpose,
+                description,
+                label,
+                parent,
+                &accountabilities,
+                &domains,
+                &users,
+                due,
+            );
+            let data = modify_part(
+                client,
+                &nest_id,
+                &tension_id,
+                &part_id,
+                &Value::Object(body),
+            )
+            .await?;
+            render::output_parts(&Value::Array(vec![data]), cfg.output)?;
+        }
+        PartsCmd::Remove {
+            nest_id,
+            tension_id,
+            part_id,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts remove")?;
+            safety::confirm_destructive(&format!("Remove proposal part '{part_id}'?"), g.yes)?;
+            let data = remove_part(client, &nest_id, &tension_id, &part_id).await?;
+            let msg = data
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("removed");
+            println!("{msg} ({part_id})");
+        }
+        PartsCmd::ProposeUpdate {
+            nest_id,
+            tension_id,
+            id,
+            title,
+            purpose,
+            description,
+            label,
+            parent,
+            accountabilities,
+            domains,
+            users,
+            due,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts propose-update")?;
+            let mut body = part_body(
+                title,
+                purpose,
+                description,
+                label,
+                parent,
+                &accountabilities,
+                &domains,
+                &users,
+                due,
+            );
+            body.insert("_id".into(), id.into());
+            let data = propose_update(client, &nest_id, &tension_id, &Value::Object(body)).await?;
+            render::output_parts(&Value::Array(vec![data]), cfg.output)?;
+        }
+        PartsCmd::ProposeDelete {
+            nest_id,
+            tension_id,
+            id,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts propose-delete")?;
+            let data = propose_delete(client, &nest_id, &tension_id, &id).await?;
+            render::output_parts(&Value::Array(vec![data]), cfg.output)?;
+        }
+        PartsCmd::Changes {
+            nest_id,
+            tension_id,
+            part_id,
+        } => {
+            let data = fetch_changes(client, &nest_id, &tension_id, &part_id).await?;
+            render::output_changes(&data, cfg.output)?;
+        }
+        PartsCmd::Children { cmd } => run_children(cmd, cfg, client, g).await?,
+    }
+    Ok(())
+}
+
+// Children dispatch is implemented in Task 5; stub until then.
+async fn run_children(
+    _cmd: ChildrenCmd,
     _cfg: &ResolvedConfig,
     _client: &NestrClient,
     _g: &GlobalArgs,
 ) -> Result<()> {
-    anyhow::bail!("parts commands are implemented in the next task")
+    anyhow::bail!("children commands are implemented in the next task")
 }
