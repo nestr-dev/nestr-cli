@@ -50,3 +50,21 @@ async fn history_passes_from_param() {
         .unwrap();
     assert_eq!(data[0]["value"], 11);
 }
+
+#[tokio::test]
+async fn list_passes_user_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/ws1/insights"))
+        .and(query_param("userId", "u1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":[]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = insights::fetch_list(&client, "ws1", &[("userId", "u1")])
+        .await
+        .unwrap();
+    assert!(data.as_array().unwrap().is_empty());
+}

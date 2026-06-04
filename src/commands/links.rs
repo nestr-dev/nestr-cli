@@ -81,6 +81,15 @@ pub async fn remove_link(
     Ok(data)
 }
 
+/// Map the CLI `--direction in|out` to the API's `incoming`/`outgoing`.
+fn map_direction(d: &str) -> &'static str {
+    if d == "in" {
+        "incoming"
+    } else {
+        "outgoing"
+    }
+}
+
 pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
@@ -94,10 +103,7 @@ pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
             let limit = limit.map(|n| n.to_string());
             let page = page.map(|n| n.to_string());
             let mut params: Vec<(&str, &str)> = Vec::new();
-            // map in/out → incoming/outgoing
-            let dir = direction
-                .as_deref()
-                .map(|d| if d == "in" { "incoming" } else { "outgoing" });
+            let dir = direction.as_deref().map(map_direction);
             if let Some(d) = dir {
                 params.push(("direction", d));
             }
@@ -131,12 +137,28 @@ pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
         } => {
             safety::enforce_read_only(g.read_only, "links remove")?;
             let data = remove_link(&client, &nest_id, &relation, &target_id).await?;
-            let msg = data
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Graph link removed");
-            println!("{msg}");
+            match cfg.output {
+                crate::config::OutputFormat::Json => print_json(&data)?,
+                crate::config::OutputFormat::Text => {
+                    let msg = data
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("Graph link removed");
+                    println!("{msg}");
+                }
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direction_mapping() {
+        assert_eq!(map_direction("in"), "incoming");
+        assert_eq!(map_direction("out"), "outgoing");
+    }
 }

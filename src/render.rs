@@ -495,10 +495,11 @@ pub fn link_table(links: &[LinkView]) -> String {
                 l.title.clone(),
                 l.relation.clone().unwrap_or_default(),
                 l.direction.clone().unwrap_or_default(),
+                crate::views::join_labels(&l.labels),
             ]
         })
         .collect();
-    format_table(&["ID", "TITLE", "RELATION", "DIRECTION"], rows)
+    format_table(&["ID", "TITLE", "RELATION", "DIRECTION", "LABELS"], rows)
 }
 
 pub fn output_links(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
