@@ -795,12 +795,141 @@ async fn run_parts(
     Ok(())
 }
 
-// Children dispatch is implemented in Task 5; stub until then.
+// ---- Children API helpers ----
+
+pub async fn fetch_children(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .get(&format!("{}/parts/{part}/children", base(nest, tid)), &[])
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn add_child(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .post(&format!("{}/parts/{part}/children", base(nest, tid)), body)
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn update_child(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+    child: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(
+            &format!("{}/parts/{part}/children/{child}", base(nest, tid)),
+            body,
+        )
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+pub async fn delete_child(
+    client: &NestrClient,
+    nest: &str,
+    tid: &str,
+    part: &str,
+    child: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .delete(&format!(
+            "{}/parts/{part}/children/{child}",
+            base(nest, tid)
+        ))
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
 async fn run_children(
-    _cmd: ChildrenCmd,
-    _cfg: &ResolvedConfig,
-    _client: &NestrClient,
-    _g: &GlobalArgs,
+    cmd: ChildrenCmd,
+    cfg: &ResolvedConfig,
+    client: &NestrClient,
+    g: &GlobalArgs,
 ) -> Result<()> {
-    anyhow::bail!("children commands are implemented in the next task")
+    match cmd {
+        ChildrenCmd::List {
+            nest_id,
+            tension_id,
+            part_id,
+        } => {
+            let data = fetch_children(client, &nest_id, &tension_id, &part_id).await?;
+            render::output_children(&data, cfg.output)?;
+        }
+        ChildrenCmd::Add {
+            nest_id,
+            tension_id,
+            part_id,
+            title,
+            label,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts children add")?;
+            let mut body = Map::new();
+            body.insert("title".into(), title.into());
+            if let Some(l) = label {
+                body.insert("labels".into(), Value::Array(vec![l.into()]));
+            }
+            let data = add_child(
+                client,
+                &nest_id,
+                &tension_id,
+                &part_id,
+                &Value::Object(body),
+            )
+            .await?;
+            render::output_children(&Value::Array(vec![data]), cfg.output)?;
+        }
+        ChildrenCmd::Update {
+            nest_id,
+            tension_id,
+            part_id,
+            child_id,
+            title,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts children update")?;
+            let data = update_child(
+                client,
+                &nest_id,
+                &tension_id,
+                &part_id,
+                &child_id,
+                &serde_json::json!({ "title": title }),
+            )
+            .await?;
+            render::output_children(&Value::Array(vec![data]), cfg.output)?;
+        }
+        ChildrenCmd::Delete {
+            nest_id,
+            tension_id,
+            part_id,
+            child_id,
+        } => {
+            safety::enforce_read_only(g.read_only, "tensions parts children delete")?;
+            let data = delete_child(client, &nest_id, &tension_id, &part_id, &child_id).await?;
+            let msg = data
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("deleted");
+            println!("{msg} ({child_id})");
+        }
+    }
+    Ok(())
 }

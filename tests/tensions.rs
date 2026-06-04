@@ -130,3 +130,24 @@ async fn changes_hits_part_changes_path() {
         .unwrap();
     assert_eq!(data[0]["variable"], "role.title");
 }
+
+#[tokio::test]
+async fn child_add_posts_title_and_label() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/c1/tensions/t1/parts/p1/children"))
+        .and(body_json(
+            serde_json::json!({"title":"Keep records","labels":["accountability"]}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"ch9","title":"Keep records"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = serde_json::json!({"title":"Keep records","labels":["accountability"]});
+    let data = tensions::add_child(&client, "c1", "t1", "p1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "ch9");
+}
