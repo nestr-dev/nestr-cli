@@ -5,8 +5,8 @@ use tabled::builder::Builder;
 
 use crate::config::OutputFormat;
 use crate::views::{
-    AppView, ChangeView, ChildView, CompactNest, GroupView, PartView, RoleView, StatusView,
-    TensionView, UserView,
+    AppView, ChangeView, ChildView, CompactNest, GroupView, InsightView, LinkView, PartView,
+    RoleView, StatusView, TensionView, UserView,
 };
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
@@ -477,6 +477,134 @@ pub fn output_children(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// Render an optional metric value, dropping a trailing `.0` on integral floats.
+fn fmt_num(v: Option<f64>) -> String {
+    match v {
+        None => String::new(),
+        Some(n) if n.fract() == 0.0 => format!("{}", n as i64),
+        Some(n) => format!("{n}"),
+    }
+}
+
+pub fn link_table(links: &[LinkView]) -> String {
+    let rows: Vec<Vec<String>> = links
+        .iter()
+        .map(|l| {
+            vec![
+                l.id.clone(),
+                l.title.clone(),
+                l.relation.clone().unwrap_or_default(),
+                l.direction.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "RELATION", "DIRECTION"], rows)
+}
+
+pub fn output_links(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let links: Vec<LinkView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if links.is_empty() {
+                print_no_results("No links.");
+                return Ok(());
+            }
+            println!("{}", link_table(&links));
+            if let Some(f) = pagination_footer(meta) {
+                println!("{f}");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn insight_table(insights: &[InsightView]) -> String {
+    let rows: Vec<Vec<String>> = insights
+        .iter()
+        .map(|i| {
+            vec![
+                i.type_.clone().unwrap_or_default(),
+                i.title.clone().unwrap_or_default(),
+                fmt_num(i.current_value),
+                fmt_num(i.compare_value),
+                i.goal.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["TYPE", "TITLE", "CURRENT", "COMPARE", "GOAL"], rows)
+}
+
+pub fn output_insights(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let insights: Vec<InsightView> =
+                serde_json::from_value(data.clone()).unwrap_or_default();
+            if insights.is_empty() {
+                print_no_results("No insights.");
+                return Ok(());
+            }
+            println!("{}", insight_table(&insights));
+        }
+    }
+    Ok(())
+}
+
+pub fn insight_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!(
+                "{}  [{}]",
+                i.title.clone().unwrap_or_default(),
+                i.type_.clone().unwrap_or_default()
+            );
+            if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
+                println!("description: {}", strip_html(d));
+            }
+            println!(
+                "current: {}  (was {})",
+                fmt_num(i.current_value),
+                fmt_num(i.compare_value)
+            );
+            if let Some(g) = &i.goal {
+                println!("goal: {g}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Render an insight-history point array (`{date, value}`) as a DATE·VALUE table.
+pub fn output_history(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let points = data.as_array().cloned().unwrap_or_default();
+            if points.is_empty() {
+                print_no_results("No history.");
+                return Ok(());
+            }
+            let rows: Vec<Vec<String>> = points
+                .iter()
+                .map(|p| {
+                    vec![
+                        p.get("date")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        fmt_num(p.get("value").and_then(Value::as_f64)),
+                    ]
+                })
+                .collect();
+            println!("{}", format_table(&["DATE", "VALUE"], rows));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -616,5 +744,34 @@ mod tests {
         .unwrap();
         let out = changes_table(&[c]);
         assert!(out.contains("circle") && out.contains("role") && !out.contains('['));
+    }
+
+    #[test]
+    fn link_table_shows_relation_direction() {
+        use crate::views::LinkView;
+        let l: LinkView = serde_json::from_value(
+            json!({"_id":"n1","title":"Mtg","relation":"meeting","direction":"outgoing","labels":[]}),
+        )
+        .unwrap();
+        let out = link_table(&[l]);
+        assert!(out.contains("Mtg") && out.contains("meeting") && out.contains("outgoing"));
+    }
+
+    #[test]
+    fn fmt_num_drops_trailing_zero() {
+        assert_eq!(fmt_num(Some(12.0)), "12");
+        assert_eq!(fmt_num(Some(1.5)), "1.5");
+        assert_eq!(fmt_num(None), "");
+    }
+
+    #[test]
+    fn insight_table_formats_values() {
+        use crate::views::InsightView;
+        let i: InsightView = serde_json::from_value(
+            json!({"type":"roles","title":"Roles","currentValue":12,"compareValue":10,"goal":"high"}),
+        )
+        .unwrap();
+        let out = insight_table(&[i]);
+        assert!(out.contains("roles") && out.contains("12") && out.contains("high"));
     }
 }
