@@ -12,7 +12,7 @@ A fast, composable command-line interface for [Nestr](https://nestr.io) — buil
 curl -fsSL https://raw.githubusercontent.com/nestr/nestr-cli/main/install.sh | sh
 ```
 
-Downloads the latest signed release for your platform, verifies its SHA-256 checksum, and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` or `NESTR_INSTALL_DIR=/path/to/bin`.
+Downloads the latest signed release for your platform, verifies its SHA-256 checksum, and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` (the bare version, no `v` prefix) or `NESTR_INSTALL_DIR=/path/to/bin`.
 
 ### From source
 
@@ -27,16 +27,19 @@ Download an archive for your platform from the [releases page](https://github.co
 
 - `nestr-<version>-<target>.tar.gz` (`.zip` on Windows) for five targets — macOS (Intel + Apple Silicon), Linux musl (x86_64 + aarch64), Windows x86_64;
 - `checksums-sha256.txt` plus a keyless [cosign](https://github.com/sigstore/cosign) signature (`.sig`) and certificate (`.pem`);
-- a CycloneDX SBOM (`nestr-sbom.cyclonedx.json`).
+- a CycloneDX SBOM (`nestr-sbom.cyclonedx.json`) — its own checksum is listed in `checksums-sha256.txt`, so the signature below covers it too.
 
-Verify before running (optional but encouraged):
+Verify before running (optional but encouraged) — check the checksum, then confirm the checksums file was signed by this repo's release workflow:
 
 ```sh
+# 1. Verify checksums (Linux). On macOS: shasum -a 256 -c checksums-sha256.txt --ignore-missing
 sha256sum -c checksums-sha256.txt --ignore-missing
+
+# 2. Verify the signature on the checksums file
 cosign verify-blob \
   --certificate checksums-sha256.txt.pem \
   --signature checksums-sha256.txt.sig \
-  --certificate-identity-regexp '^https://github.com/nestr/nestr-cli' \
+  --certificate-identity-regexp '^https://github.com/nestr/nestr-cli/.github/workflows/release.yml' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums-sha256.txt
 ```
