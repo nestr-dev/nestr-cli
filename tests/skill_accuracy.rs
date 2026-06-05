@@ -210,6 +210,12 @@ fn derive_path_handles_real_shapes() {
         derive_path("nestr export work > work.json"),
         Some(vec!["export".into(), "work".into()])
     );
+    // A flag right after the subcommand must NOT extend the path — `--title` is
+    // only lowercase letters and hyphens but is a flag, not a subcommand.
+    assert_eq!(
+        derive_path("nestr circles create --title \"Marketing\""),
+        Some(vec!["circles".into(), "create".into()])
+    );
     assert_eq!(derive_path("echo hello"), None);
 }
 
