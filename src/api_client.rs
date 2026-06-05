@@ -96,15 +96,14 @@ impl NestrClient {
         self.request(Method::DELETE, path, &[], Some(body)).await
     }
 
-    /// Single code path for all verbs. On a 403 with a refresh context, refresh
-    /// the token once and retry; a still-403 falls through to the error mapping.
-    async fn request<T: DeserializeOwned>(
+    /// Send a request (with one 403-refresh-retry) and return the raw checked body.
+    async fn request_text(
         &self,
         method: Method,
         path: &str,
         query: &[(&str, &str)],
         body: Option<&Value>,
-    ) -> Result<T> {
+    ) -> Result<String> {
         let url = format!("{}{path}", self.api_base);
         let resp = self.send(&method, &url, query, body).await?;
         // On a 403 with a refresh context, refresh the token once and retry.
@@ -119,9 +118,25 @@ impl NestrClient {
             }
             _ => resp,
         };
-        let text = self.checked_text(resp).await?;
+        self.checked_text(resp).await
+    }
+
+    async fn request<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<T> {
+        let text = self.request_text(method, path, query, body).await?;
         let json = if text.trim().is_empty() { "{}" } else { &text };
         Ok(serde_json::from_str(json)?)
+    }
+
+    /// DELETE returning the raw checked body (no JSON parse) — for routes that
+    /// respond with a bare string like `"success"`.
+    pub async fn delete_text(&self, path: &str) -> Result<String> {
+        self.request_text(Method::DELETE, path, &[], None).await
     }
 
     async fn send(

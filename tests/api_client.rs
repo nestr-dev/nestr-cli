@@ -97,3 +97,19 @@ async fn delete_body_sends_json_body() {
         .unwrap();
     assert_eq!(v["status"], "ok");
 }
+
+#[tokio::test]
+async fn delete_text_returns_raw_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/workspaces/ws/webhooks/wh1"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("success"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = client
+        .delete_text("/workspaces/ws/webhooks/wh1")
+        .await
+        .unwrap();
+    assert_eq!(body, "success");
+}
