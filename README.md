@@ -39,7 +39,7 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 cosign verify-blob \
   --certificate checksums-sha256.txt.pem \
   --signature checksums-sha256.txt.sig \
-  --certificate-identity-regexp '^https://github.com/nestr/nestr-cli/.github/workflows/release.yml' \
+  --certificate-identity-regexp '^https://github\.com/nestr/nestr-cli/\.github/workflows/release\.yml@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums-sha256.txt
 ```
