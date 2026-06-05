@@ -8,7 +8,9 @@ description: Use when working with Nestr from the terminal — searching, readin
 `nestr` is a fast, composable CLI for Nestr. Everything in Nestr is a **Nest**
 (projects, todos, comments, inbox items — all nests distinguished by labels).
 Pick a profile once (`nestr profiles add`), then work the loop below. Add
-`-o json` to any command to get raw JSON for piping to `jq`.
+`-o json` to any command to get raw JSON for piping to `jq`. See
+[`../shared/reference.md`](../shared/reference.md) for profiles, global flags, and
+the full command map.
 
 ## Find things
 

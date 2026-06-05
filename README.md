@@ -2,7 +2,7 @@
 
 A fast, composable command-line interface for [Nestr](https://nestr.io), for terminal users and AI agents.
 
-> Status: Phase 3 (governance) — auth/profiles, the everyday loop, org & people, and governance tensions (propose → consent → enact). See `docs/superpowers/specs/` for the design and roadmap.
+> Status: feature-complete across the API surface — auth & profiles, the everyday loop (search, nests, comments, inbox, plan, notifications, labels, projects, work), org & people (workspaces, circles, roles, users, groups), governance tensions (propose → consent → enact), graph links, insights, export, and webhooks. See `docs/superpowers/specs/` for the design and roadmap.
 
 ## Install (from source)
 
@@ -33,12 +33,17 @@ Add `-o json` to any command for raw JSON, `--read-only` to block writes, and
 
 ## Skills
 
-This repo ships a `nestr-basics` skill (`skills/nestr-basics/SKILL.md`) covering
-the everyday command loop. It is authored as a plain `SKILL.md` so the hosted
-Nestr MCP can consume the same file over time.
+Five `SKILL.md` files under `skills/` cover the CLI, authored as plain Markdown so
+the hosted Nestr MCP can consume them over time:
 
-A `nestr-governance` skill (`skills/nestr-governance/SKILL.md`) covers the tension
-workflow: propose, review changes, submit for consent, and vote.
+- **`nestr-basics`** — the everyday loop (search, nests, inbox, plan, comments).
+- **`nestr-governance`** — tensions: propose, review changes, consent, vote.
+- **`nestr-org`** — workspaces, circles, roles, users, groups (admin/structure).
+- **`nestr-insights`** — graph links, insights/metrics, and JSON export.
+- **`nestr-webhooks`** — workspace event subscriptions.
+
+Start at [`skills/README.md`](skills/README.md); shared setup, global flags, and a
+full command map live in [`skills/shared/reference.md`](skills/shared/reference.md).
 
 ## License
 

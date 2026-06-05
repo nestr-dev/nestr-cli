@@ -7,6 +7,8 @@ description: Use when proposing or processing organizational change in Nestr via
 
 A **tension** is the gap between current reality and a desired state. In Nestr you
 process tensions through governance: propose a change, the circle consents, it enacts.
+See [`../shared/reference.md`](../shared/reference.md) for profiles, global flags,
+and the full command map.
 
 ## Anatomy of a tension
 
