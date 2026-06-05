@@ -310,6 +310,29 @@ pub struct LinkView {
     pub direction: Option<String>,
 }
 
+/// A workspace webhook subscription.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WebhookView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default, rename = "type")]
+    pub type_: Option<String>,
+    #[serde(default)]
+    pub event: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default, rename = "ancestorId")]
+    pub ancestor_id: Option<String>,
+    #[serde(default, rename = "createdAt")]
+    pub created_at: Option<String>,
+    #[serde(default, rename = "triggerCount")]
+    pub trigger_count: Option<u64>,
+    #[serde(default, rename = "errorCount")]
+    pub error_count: Option<u64>,
+}
+
 /// An organizational-health metric (insight).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct InsightView {
@@ -440,6 +463,19 @@ mod tests {
         assert_eq!(i.compare_value, Some(10.0));
         let empty: InsightView = serde_json::from_value(json!({})).unwrap();
         assert!(empty.current_value.is_none());
+    }
+
+    #[test]
+    fn webhook_view_renames_type_and_counts() {
+        let w: WebhookView = serde_json::from_value(json!({
+            "_id":"wh1","url":"https://x.test/hook","type":"nest","event":"create","triggerCount":3
+        }))
+        .unwrap();
+        assert_eq!(w.id, "wh1");
+        assert_eq!(w.type_.as_deref(), Some("nest"));
+        assert_eq!(w.trigger_count, Some(3));
+        let empty: WebhookView = serde_json::from_value(json!({})).unwrap();
+        assert!(empty.url.is_none());
     }
 
     #[test]

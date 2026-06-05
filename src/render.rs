@@ -6,7 +6,7 @@ use tabled::builder::Builder;
 use crate::config::OutputFormat;
 use crate::views::{
     AppView, ChangeView, ChildView, CompactNest, GroupView, InsightView, LinkView, PartView,
-    RoleView, StatusView, TensionView, UserView,
+    RoleView, StatusView, TensionView, UserView, WebhookView,
 };
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
@@ -606,6 +606,69 @@ pub fn output_history(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+pub fn webhook_table(hooks: &[WebhookView]) -> String {
+    let rows: Vec<Vec<String>> = hooks
+        .iter()
+        .map(|w| {
+            vec![
+                w.id.clone(),
+                w.url.clone().unwrap_or_default(),
+                w.type_.clone().unwrap_or_default(),
+                w.event.clone().unwrap_or_default(),
+                w.label.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "URL", "TYPE", "EVENT", "LABEL"], rows)
+}
+
+pub fn output_webhooks(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let hooks: Vec<WebhookView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if hooks.is_empty() {
+                print_no_results("No webhooks.");
+                return Ok(());
+            }
+            println!("{}", webhook_table(&hooks));
+        }
+    }
+    Ok(())
+}
+
+pub fn webhook_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let w: WebhookView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", w.url.clone().unwrap_or_default(), w.id);
+            println!(
+                "{} {}",
+                w.type_.clone().unwrap_or_default(),
+                w.event.clone().unwrap_or_default()
+            );
+            if let Some(l) = &w.label {
+                println!("label: {l}");
+            }
+            if let Some(a) = &w.ancestor_id {
+                println!("ancestor: {a}");
+            }
+            if let Some(c) = &w.created_at {
+                println!("created: {c}");
+            }
+            if w.trigger_count.is_some() || w.error_count.is_some() {
+                println!(
+                    "triggers: {}  errors: {}",
+                    w.trigger_count.unwrap_or(0),
+                    w.error_count.unwrap_or(0)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,5 +837,21 @@ mod tests {
         .unwrap();
         let out = insight_table(&[i]);
         assert!(out.contains("roles") && out.contains("12") && out.contains("high"));
+    }
+
+    #[test]
+    fn webhook_table_shows_url_type_event() {
+        use crate::views::WebhookView;
+        let w: WebhookView = serde_json::from_value(
+            json!({"_id":"wh1","url":"https://x.test/h","type":"nest","event":"create"}),
+        )
+        .unwrap();
+        let out = webhook_table(&[w]);
+        assert!(
+            out.contains("wh1")
+                && out.contains("https://x.test/h")
+                && out.contains("nest")
+                && out.contains("create")
+        );
     }
 }
