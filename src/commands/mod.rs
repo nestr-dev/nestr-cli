@@ -18,6 +18,7 @@ pub mod roles;
 pub mod search;
 pub mod tensions;
 pub mod users;
+pub mod webhooks;
 pub mod work;
 pub mod workspaces;
 

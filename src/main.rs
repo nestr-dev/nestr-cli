@@ -2,7 +2,8 @@ use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
     auth, circles, comments, export, groups, inbox, insights, labels, links, me, nests,
-    notifications, plan, profiles, projects, roles, search, tensions, users, work, workspaces,
+    notifications, plan, profiles, projects, roles, search, tensions, users, webhooks, work,
+    workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -45,7 +46,10 @@ use nestr_cli::config::OutputFormat;
 \x1b[1m\x1b[4mGraph & Insights:\x1b[0m
   \x1b[1mlinks\x1b[0m      List/add/remove graph links
   \x1b[1minsights\x1b[0m   Organizational health metrics (BETA)
-  \x1b[1mexport\x1b[0m     Dump governance/work as JSON"
+  \x1b[1mexport\x1b[0m     Dump governance/work as JSON
+
+\x1b[1m\x1b[4mIntegrations:\x1b[0m
+  \x1b[1mwebhooks\x1b[0m   List/create/delete workspace webhooks (admin)"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -198,6 +202,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::export::ExportCmd,
     },
+    /// Workspace webhooks (admin).
+    Webhooks {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::webhooks::WebhooksCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -277,6 +286,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Links { cmd } => links::run(cmd, &g).await,
         Commands::Insights { cmd } => insights::run(cmd, &g).await,
         Commands::Export { cmd } => export::run(cmd, &g).await,
+        Commands::Webhooks { cmd } => webhooks::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())
