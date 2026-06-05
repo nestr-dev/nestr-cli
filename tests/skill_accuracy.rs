@@ -5,6 +5,15 @@
 //! and short-circuits before any config/network, so the test is hermetic).
 //!
 //! Scope: subcommand *paths* only — not flags or positional values.
+//!
+//! Trailing positional arguments that happen to be bare words (a single-word
+//! quoted arg like `"editors"`, or a value like `insights on` / `accept`) are
+//! appended to the derived path rather than stopping it — we don't know each
+//! command's positional arity without introspecting clap. This is harmless: clap
+//! accepts the extra positionals before `--help` (exit 0), and an *invalid
+//! subcommand* in the prefix still fails before `--help` (exit 2), so subcommand
+//! drift is still caught. The path walk does stop at the first flag, multi-word
+//! quoted string, `<placeholder>`, or redirect.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
