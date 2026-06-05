@@ -2,3 +2,7 @@
 **/*.rs.bk
 Cargo.lock.orig
 .DS_Store
+
+# Design specs/plans live in a separate private checkout (nestr-cli-specs),
+# not in the public repo.
+docs/superpowers/

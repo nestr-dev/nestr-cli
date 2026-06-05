@@ -2,7 +2,7 @@
 
 A fast, composable command-line interface for [Nestr](https://nestr.io), for terminal users and AI agents.
 
-> Status: feature-complete across the API surface — auth & profiles, the everyday loop (search, nests, comments, inbox, plan, notifications, labels, projects, work), org & people (workspaces, circles, roles, users, groups), governance tensions (propose → consent → enact), graph links, insights, export, and webhooks. See `docs/superpowers/specs/` for the design and roadmap.
+> Status: feature-complete across the API surface — auth & profiles, the everyday loop (search, nests, comments, inbox, plan, notifications, labels, projects, work), org & people (workspaces, circles, roles, users, groups), governance tensions (propose → consent → enact), graph links, insights, export, and webhooks.
 
 ## Install (from source)
 
