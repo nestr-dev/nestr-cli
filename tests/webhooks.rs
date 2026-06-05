@@ -57,6 +57,29 @@ async fn create_sends_url_type_event() {
 }
 
 #[tokio::test]
+async fn create_sends_label_and_ancestor() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/workspaces/ws1/webhooks"))
+        .and(body_json(serde_json::json!({
+            "url":"https://x.test/h","type":"comment","event":"update","label":"urgent","ancestorId":"n1"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"wh5"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = serde_json::json!({
+        "url":"https://x.test/h","type":"comment","event":"update","label":"urgent","ancestorId":"n1"
+    });
+    let data = webhooks::create_webhook(&client, "ws1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "wh5");
+}
+
+#[tokio::test]
 async fn delete_tolerates_bare_success() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))

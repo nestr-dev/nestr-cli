@@ -112,7 +112,7 @@ pub async fn run(cmd: WebhooksCmd, g: &GlobalArgs) -> Result<()> {
         WebhooksCmd::Delete { id } => {
             safety::enforce_read_only(g.read_only, "webhooks delete")?;
             safety::confirm_destructive(&format!("Delete webhook '{id}'?"), g.yes)?;
-            let _ = delete_webhook(&client, &ws, &id).await?;
+            delete_webhook(&client, &ws, &id).await?;
             println!("Webhook deleted ({id}).");
         }
     }
