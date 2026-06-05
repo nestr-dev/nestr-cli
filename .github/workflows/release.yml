@@ -14,14 +14,12 @@ env:
   CARGO_TERM_COLOR: always
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
   verify-version:
     name: Verify tag matches Cargo.toml
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -44,6 +42,8 @@ jobs:
     name: Build (${{ matrix.target }})
     needs: verify-version
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +77,7 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --locked
 
       - name: Build (cross)
         if: matrix.cross
@@ -112,16 +112,26 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+        # required for the anchore/sbom-action workspace scan below
 
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@55dc4ee22412511ee8c3142cbea40418e6cec693 # v0.17.8
+        with:
+          format: cyclonedx-json
+          output-file: artifacts/nestr-sbom.cyclonedx.json
 
       - name: Generate checksums
         run: |
@@ -138,12 +148,6 @@ jobs:
             --output-signature artifacts/checksums-sha256.txt.sig \
             --output-certificate artifacts/checksums-sha256.txt.pem \
             artifacts/checksums-sha256.txt
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@55dc4ee22412511ee8c3142cbea40418e6cec693 # v0.17.8
-        with:
-          format: cyclonedx-json
-          output-file: artifacts/nestr-sbom.cyclonedx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
