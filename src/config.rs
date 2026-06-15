@@ -1,6 +1,5 @@
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -160,6 +159,7 @@ pub fn save_config(config: &Config) -> Result<()> {
 }
 
 pub fn load_profile(name: &str) -> Result<Profile> {
+    validate_profile_name(name)?;
     let path = profile_file(name);
     let raw = std::fs::read_to_string(&path).with_context(|| {
         format!("Profile '{name}' not found. Run `nestr profiles add` to set it up.")
@@ -167,28 +167,123 @@ pub fn load_profile(name: &str) -> Result<Profile> {
     toml::from_str(&raw).with_context(|| format!("parsing profile '{name}'"))
 }
 
-pub fn save_profile(name: &str, profile: &Profile) -> Result<()> {
-    std::fs::create_dir_all(profiles_dir())?;
-    let path = profile_file(name);
-    let content = toml::to_string_pretty(profile).context("serializing profile")?;
-    std::fs::write(&path, &content).with_context(|| format!("writing {}", path.display()))?;
-    #[cfg(unix)]
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("setting permissions on {}", path.display()))?;
+/// Reject profile names that could escape the profiles directory or create stray
+/// files. Allowed: ASCII alphanumerics plus `_`, `-`, `.` — no path separators,
+/// no `..`. (COR-8)
+pub fn validate_profile_name(name: &str) -> Result<()> {
+    if name.is_empty() || name == "." || name == ".." {
+        anyhow::bail!("invalid profile name '{name}'");
+    }
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+    {
+        anyhow::bail!("invalid profile name '{name}': use letters, digits, '_', '-', '.' only");
+    }
     Ok(())
 }
 
-/// Update just the OAuth token set on a stored profile (used by reactive refresh).
+/// Create a directory (recursively) with mode 0700 on unix. (SEC-9)
+fn create_dir_secure(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .with_context(|| format!("creating {}", dir.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    Ok(())
+}
+
+/// Atomically write `bytes` to `path` with mode 0600 (unix): write a temp file in
+/// the same directory created 0600, then rename over the target. Secrets never
+/// exist world-readable and a crash can't leave a half-written/permissive file.
+/// (SEC-8)
+fn write_secure_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = path.parent().expect("profile path has a parent");
+    let stem = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("profile");
+    let tmp = dir.join(format!(".{stem}.{}.tmp", std::process::id()));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(&tmp)
+        .with_context(|| format!("creating {}", tmp.display()))?;
+    // Don't leak the temp file if write/sync/rename fails partway.
+    let write_res: std::io::Result<()> = (|| {
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    drop(f);
+    if let Err(e) = write_res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(anyhow::Error::new(e).context(format!("writing {}", tmp.display())));
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(anyhow::Error::new(e).context(format!(
+            "renaming {} -> {}",
+            tmp.display(),
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+pub fn save_profile(name: &str, profile: &Profile) -> Result<()> {
+    validate_profile_name(name)?;
+    create_dir_secure(&profiles_dir())?;
+    let path = profile_file(name);
+    let content = toml::to_string_pretty(profile).context("serializing profile")?;
+    write_secure_atomic(&path, content.as_bytes())?;
+    Ok(())
+}
+
+/// Hold an exclusive advisory lock on the profiles dir for the duration of a
+/// read-modify-write of profile tokens, so two concurrent `nestr` processes
+/// (scripted/agent use) can't interleave a refresh. Released when the returned
+/// File drops. Uses `std::fs::File::lock` (stable since Rust 1.89). (SEC-10)
+fn lock_profiles() -> Result<std::fs::File> {
+    create_dir_secure(&profiles_dir())?;
+    let f = std::fs::File::create(profiles_dir().join(".lock")).context("opening profiles lock")?;
+    f.lock().context("locking profiles dir")?;
+    Ok(f)
+}
+
+/// Update just the OAuth token set on a stored profile. Takes an exclusive lock,
+/// then reloads from disk; if another process already wrote a still-valid token,
+/// keeps that instead of clobbering it with ours.
 pub fn update_profile_oauth_tokens(
     name: &str,
     tokens: &crate::oauth::StoredOAuthTokens,
 ) -> Result<()> {
+    validate_profile_name(name)?;
+    let _lock = lock_profiles()?;
     let mut profile = load_profile(name)?;
+    if let Some(existing) = &profile.oauth_tokens {
+        if existing.is_valid() && existing != tokens {
+            return Ok(());
+        }
+    }
     profile.oauth_tokens = Some(tokens.clone());
     save_profile(name, &profile)
 }
 
 pub fn delete_profile_file(name: &str) -> Result<()> {
+    validate_profile_name(name)?;
     let path = profile_file(name);
     if path.exists() {
         std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
@@ -413,6 +508,42 @@ mod tests {
             Some("prof".to_string())
         );
         assert_eq!(resolve_bearer_precedence(None, None, None), None);
+    }
+
+    #[test]
+    fn rejects_profile_names_with_traversal() {
+        assert!(validate_profile_name("prod").is_ok());
+        assert!(validate_profile_name("local-2.dev").is_ok());
+        assert!(validate_profile_name("../evil").is_err());
+        assert!(validate_profile_name("a/b").is_err());
+        assert!(validate_profile_name("").is_err());
+    }
+
+    #[test]
+    fn save_profile_rejects_traversal_name() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("NESTR_HOME", tmp.path());
+        let p = test_profile("https://app.nestr.io");
+        assert!(save_profile("../escape", &p).is_err());
+        std::env::remove_var("NESTR_HOME");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn profiles_dir_is_0700_after_save() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("NESTR_HOME", tmp.path());
+        let p = test_profile("https://app.nestr.io");
+        save_profile("p", &p).unwrap();
+        let mode = std::fs::metadata(profiles_dir())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+        std::env::remove_var("NESTR_HOME");
     }
 
     #[test]
