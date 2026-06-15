@@ -12,10 +12,12 @@ pub async fn run_login(profile: Option<String>) -> Result<()> {
     if p.auth != AuthKind::OAuth {
         bail!("Profile '{name}' uses API-key auth. Use `nestr profiles add` to switch to OAuth.");
     }
-    keyring_store::delete_profile(&name);
     let tokens = oauth::browser_login(&p.authorize_url(), &p.token_url(), &p.client_id()).await?;
     match p.credential_storage {
-        CredentialStorage::OsStore => oauth::store_tokens_keyring(&name, &tokens)?,
+        CredentialStorage::OsStore => {
+            keyring_store::delete_profile(&name);
+            oauth::store_tokens_keyring(&name, &tokens)?;
+        }
         CredentialStorage::File => {
             p.oauth_tokens = Some(oauth::tokens_to_stored(&tokens));
             config::save_profile(&name, &p)?;

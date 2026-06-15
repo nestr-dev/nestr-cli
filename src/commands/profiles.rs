@@ -130,7 +130,6 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
     };
 
     if use_oauth {
-        keyring_store::delete_profile(&name);
         let tokens = oauth::browser_login(
             &profile.authorize_url(),
             &profile.token_url(),
@@ -140,7 +139,10 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
         println!("Login successful.");
         profile.credential_storage = pick_storage()?;
         match profile.credential_storage {
-            CredentialStorage::OsStore => oauth::store_tokens_keyring(&name, &tokens)?,
+            CredentialStorage::OsStore => {
+                keyring_store::delete_profile(&name);
+                oauth::store_tokens_keyring(&name, &tokens)?;
+            }
             CredentialStorage::File => {
                 profile.oauth_tokens = Some(oauth::tokens_to_stored(&tokens))
             }

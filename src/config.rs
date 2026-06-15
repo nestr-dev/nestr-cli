@@ -349,6 +349,7 @@ pub async fn resolve(
     if let Some(h) = host_flag {
         profile.host = h.to_string();
     }
+    let host_overridden = host_flag.is_some();
 
     let env_api_key = std::env::var("NESTR_API_KEY").ok();
     let bearer = match profile.auth {
@@ -373,11 +374,12 @@ pub async fn resolve(
                     &profile.client_id(),
                     profile.credential_storage,
                     profile.oauth_tokens.as_ref(),
+                    host_overridden,
                 )
                 .await?;
                 if let Some(new_tokens) = refreshed {
+                    update_profile_oauth_tokens(&name, &new_tokens)?;
                     profile.oauth_tokens = Some(new_tokens);
-                    save_profile(&name, &profile)?;
                 }
                 bearer
             }
@@ -390,7 +392,7 @@ pub async fn resolve(
 
     // Build the reactive-refresh context for OAuth profiles that still hold a
     // refresh token (so a 403 can refresh-and-retry once). API-key profiles: None.
-    let refresh = if profile.auth == AuthKind::OAuth {
+    let refresh = if profile.auth == AuthKind::OAuth && !host_overridden {
         crate::oauth::current_refresh_token(
             &name,
             profile.credential_storage,

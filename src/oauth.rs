@@ -300,6 +300,7 @@ pub async fn resolve_token(
     client_id: &str,
     storage: CredentialStorage,
     file_tokens: Option<&StoredOAuthTokens>,
+    host_overridden: bool,
 ) -> Result<(String, Option<StoredOAuthTokens>)> {
     let current: StoredOAuthTokens = match storage {
         CredentialStorage::OsStore => load_tokens_keyring(profile_name)?.ok_or_else(|| {
@@ -312,6 +313,12 @@ pub async fn resolve_token(
 
     if current.is_valid() {
         return Ok((current.access_token, None));
+    }
+    if host_overridden {
+        anyhow::bail!(
+            "Cannot refresh OAuth tokens while --host/NESTR_HOST overrides the profile host; \
+             use --api-key or a profile created for that host"
+        );
     }
     let refresh_token = current.refresh_token.clone().ok_or_else(|| {
         anyhow::anyhow!("OAuth session expired for '{profile_name}'. Run `nestr auth login`.")
@@ -427,6 +434,49 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("state=STATE"));
         assert!(url.contains("scope=user%20nest"));
+    }
+
+    #[tokio::test]
+    async fn resolve_token_refuses_refresh_under_host_override() {
+        let expired = StoredOAuthTokens {
+            access_token: "old".into(),
+            refresh_token: Some("r".into()),
+            id_token: None,
+            expiry: Some(0),
+        };
+        let err = resolve_token(
+            "p",
+            "http://override.example/oauth/token",
+            "client",
+            CredentialStorage::File,
+            Some(&expired),
+            true, // host_overridden
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("overrides the profile host"));
+    }
+
+    #[tokio::test]
+    async fn resolve_token_allows_valid_token_under_host_override() {
+        let valid = StoredOAuthTokens {
+            access_token: "valid_tok".into(),
+            refresh_token: Some("r".into()),
+            id_token: None,
+            expiry: Some(unix_now_secs() + 3600),
+        };
+        let (tok, refreshed) = resolve_token(
+            "p",
+            "http://override.example/oauth/token",
+            "client",
+            CredentialStorage::File,
+            Some(&valid),
+            true, // host_overridden — a still-valid token needs no refresh, so OK
+        )
+        .await
+        .unwrap();
+        assert_eq!(tok, "valid_tok");
+        assert!(refreshed.is_none());
     }
 
     #[test]
