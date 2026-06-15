@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="nestr/nestr-cli"
+REPO="nestr-dev/nestr-cli"
 BINARY_NAME="nestr"
 
 main() {
@@ -49,7 +49,7 @@ main() {
         if cosign verify-blob \
             --certificate "${tmp}/checksums.txt.pem" \
             --signature "${tmp}/checksums.txt.sig" \
-            --certificate-identity-regexp '^https://github\.com/nestr/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
+            --certificate-identity-regexp '^https://github\.com/nestr-dev/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${tmp}/checksums.txt" >/dev/null 2>&1; then
             echo "Signature verified (cosign)."
