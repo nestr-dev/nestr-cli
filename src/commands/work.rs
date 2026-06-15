@@ -37,7 +37,7 @@ pub async fn run(g: &GlobalArgs) -> Result<()> {
             section(&data, "projects", "Projects");
             section(&data, "todos", "Todos");
             if let Some(ts) = data.get("lastUpdateAt").and_then(|v| v.as_str()) {
-                println!("\nlast update: {ts}");
+                println!("\nlast update: {}", render::clean_text(ts));
             }
         }
     }

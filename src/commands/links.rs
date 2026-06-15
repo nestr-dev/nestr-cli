@@ -144,7 +144,7 @@ pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
                         .get("message")
                         .and_then(|m| m.as_str())
                         .unwrap_or("Graph link removed");
-                    println!("{msg}");
+                    println!("{}", render::clean_text(msg));
                 }
             }
         }

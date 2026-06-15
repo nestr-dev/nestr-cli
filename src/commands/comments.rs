@@ -154,7 +154,7 @@ pub async fn run(cmd: CommentsCmd, g: &GlobalArgs) -> Result<()> {
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("deleted");
-            println!("{msg} ({comment_id})");
+            println!("{} ({comment_id})", render::clean_text(msg));
         }
     }
     Ok(())

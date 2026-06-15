@@ -315,7 +315,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("deleted");
-            println!("{msg} ({id})");
+            println!("{} ({id})", render::clean_text(msg));
         }
         NestsCmd::Reorder {
             id,

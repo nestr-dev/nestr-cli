@@ -465,7 +465,7 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("deleted");
-            println!("{msg} ({tension_id})");
+            println!("{} ({tension_id})", render::clean_text(msg));
         }
         TensionsCmd::Status {
             nest_id,
@@ -748,7 +748,7 @@ async fn run_parts(
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("removed");
-            println!("{msg} ({part_id})");
+            println!("{} ({part_id})", render::clean_text(msg));
         }
         PartsCmd::ProposeUpdate {
             nest_id,
@@ -942,7 +942,7 @@ async fn run_children(
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("deleted");
-            println!("{msg} ({child_id})");
+            println!("{} ({child_id})", render::clean_text(msg));
         }
     }
     Ok(())
