@@ -31,6 +31,36 @@ pub fn unwrap_data(v: Value) -> (Value, Option<Value>, Option<Value>) {
     (v, None, None)
 }
 
+/// Reject path traversal, query/fragment injection, and out-of-alphabet segments
+/// in an API request path. Every request flows through `request_text`, and IDs are
+/// interpolated into `path` by callers, so this single chokepoint stops a crafted
+/// ID (e.g. one copied by an agent from attacker-authored API content) from
+/// retargeting the request to a different route, injecting a query, or escaping
+/// via `..`. Allowed per segment: ASCII alphanumerics plus `_`, `-`, and `,`
+/// (comma for the multi-id `/nests/{ids}` route). Query params are added separately
+/// via reqwest `.query()`, never here. (SEC-2, SEC-16)
+fn validate_path(path: &str) -> Result<()> {
+    for seg in path.split('/') {
+        if seg.is_empty() {
+            continue;
+        }
+        if seg == "." || seg == ".." {
+            return Err(NestrError::Validation(format!(
+                "illegal path segment '{seg}' in request path '{path}'"
+            )));
+        }
+        if !seg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b','))
+        {
+            return Err(NestrError::Validation(format!(
+                "illegal characters in id/path segment '{seg}' (request path '{path}')"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Thin reqwest wrapper. The bearer lives in a shared cell so a reactive refresh
 /// can swap it mid-flight; consumer + content-type headers are baked in.
 #[derive(Clone)]
@@ -104,6 +134,7 @@ impl NestrClient {
         query: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<String> {
+        validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
         let resp = self.send(&method, &url, query, body).await?;
         // On a 403 with a refresh context, refresh the token once and retry.
@@ -221,5 +252,22 @@ mod tests {
         let v = json!({"data":{"k":1}});
         let (data, _, _) = unwrap_data(v.clone());
         assert_eq!(data, v);
+    }
+
+    #[test]
+    fn validate_path_accepts_normal_routes() {
+        assert!(validate_path("/nests/abc/search").is_ok());
+        assert!(validate_path("/workspaces/ws1/users/u-1/groups").is_ok());
+        assert!(validate_path("/nests/a,b,c").is_ok()); // multi-id route
+        assert!(validate_path("/users/me/notifications/mark-all-read").is_ok());
+    }
+
+    #[test]
+    fn validate_path_rejects_traversal_and_injection() {
+        assert!(validate_path("/nests/../workspaces/W/webhooks/X").is_err()); // SEC-2
+        assert!(validate_path("/nests/abc?x=1").is_err()); // query injection
+        assert!(validate_path("/nests/abc#frag").is_err());
+        assert!(validate_path("/nests/a b").is_err()); // space
+        assert!(validate_path("/nests/.").is_err());
     }
 }
