@@ -41,6 +41,26 @@ main() {
     fi
     [ "$expected" = "$actual" ] || { echo "Checksum mismatch" >&2; exit 1; }
 
+    # Opportunistic signature verification: if cosign is installed, verify the
+    # checksums file's keyless signature before trusting it. (SEC-13)
+    if command -v cosign >/dev/null 2>&1; then
+        curl -fsSL "${base}/checksums-sha256.txt.sig" -o "${tmp}/checksums.txt.sig"
+        curl -fsSL "${base}/checksums-sha256.txt.pem" -o "${tmp}/checksums.txt.pem"
+        if cosign verify-blob \
+            --certificate "${tmp}/checksums.txt.pem" \
+            --signature "${tmp}/checksums.txt.sig" \
+            --certificate-identity-regexp '^https://github\.com/nestr/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${tmp}/checksums.txt" >/dev/null 2>&1; then
+            echo "Signature verified (cosign)."
+        else
+            echo "Signature verification FAILED — aborting." >&2
+            exit 1
+        fi
+    else
+        echo "Note: cosign not found; verified SHA-256 integrity only (not the signature)."
+    fi
+
     tar xzf "${tmp}/${archive}" -C "$tmp"
     dir="${NESTR_INSTALL_DIR:-}"
     if [ -z "$dir" ]; then

@@ -12,7 +12,7 @@ A fast, composable command-line interface for [Nestr](https://nestr.io) — buil
 curl -fsSL https://raw.githubusercontent.com/nestr/nestr-cli/main/install.sh | sh
 ```
 
-Downloads the latest signed release for your platform, verifies its SHA-256 checksum, and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` (the bare version, no `v` prefix) or `NESTR_INSTALL_DIR=/path/to/bin`.
+Downloads the latest release for your platform, verifies its SHA-256 checksum (and, if `cosign` is installed, its keyless signature), and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` (the bare version, no `v` prefix) or `NESTR_INSTALL_DIR=/path/to/bin`.
 
 ### From source
 
