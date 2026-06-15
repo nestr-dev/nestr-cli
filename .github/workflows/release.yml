@@ -38,6 +38,8 @@ jobs:
           fi
           echo "Version match confirmed."
 
+  # build runs only after verify-version; advisories are gated on PRs to main by
+  # lint.yml's `audit` job (see .github/workflows/lint.yml).
   build:
     name: Build (${{ matrix.target }})
     needs: verify-version
@@ -77,7 +79,7 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --locked
+        run: cargo install cross --version 0.2.5 --locked
 
       - name: Build (cross)
         if: matrix.cross
@@ -140,9 +142,11 @@ jobs:
           cat checksums-sha256.txt
 
       - name: Install cosign
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
 
       - name: Sign checksums
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           cosign sign-blob --yes \
             --output-signature artifacts/checksums-sha256.txt.sig \
@@ -150,6 +154,7 @@ jobs:
             artifacts/checksums-sha256.txt
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
