@@ -217,7 +217,7 @@ pub async fn run(cmd: CirclesCmd, g: &GlobalArgs) -> Result<()> {
     match cmd {
         CirclesCmd::List => {
             let (data, meta) = fetch_list(&client, &ws, &clean_params(cfg.output)).await?;
-            render::output_roles(&data, meta.as_ref(), cfg.output)?;
+            render::output_roles(&data, meta.as_ref(), cfg.output, false)?;
         }
         CirclesCmd::Get { id } => {
             let data = fetch_get(&client, &ws, &id, &clean_params(cfg.output)).await?;
@@ -279,11 +279,11 @@ pub async fn run(cmd: CirclesCmd, g: &GlobalArgs) -> Result<()> {
         }
         CirclesCmd::Roles { id } => {
             let (data, meta) = fetch_roles(&client, &ws, &id, &clean_params(cfg.output)).await?;
-            render::output_roles(&data, meta.as_ref(), cfg.output)?;
+            render::output_roles(&data, meta.as_ref(), cfg.output, false)?;
         }
         CirclesCmd::Projects { id } => {
             let (data, meta) = fetch_projects(&client, &ws, &id, &[]).await?;
-            render::output_nests(&data, meta.as_ref(), cfg.output)?;
+            render::output_nests(&data, meta.as_ref(), cfg.output, false)?;
         }
         CirclesCmd::Posts { id, depth } => {
             let mut params: Vec<(&str, &str)> = Vec::new();
@@ -295,7 +295,7 @@ pub async fn run(cmd: CirclesCmd, g: &GlobalArgs) -> Result<()> {
         }
         CirclesCmd::Tensions { id } => {
             let (data, meta) = fetch_tensions(&client, &ws, &id, &clean_params(cfg.output)).await?;
-            render::output_tensions(&data, meta.as_ref(), cfg.output)?;
+            render::output_tensions(&data, meta.as_ref(), cfg.output, false)?;
         }
     }
     Ok(())

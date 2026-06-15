@@ -125,7 +125,7 @@ async fn changes_hits_part_changes_path() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let data = tensions::fetch_changes(&client, "c1", "t1", "p1")
+    let data = tensions::fetch_changes(&client, "c1", "t1", "p1", &[])
         .await
         .unwrap();
     assert_eq!(data[0]["variable"], "role.title");

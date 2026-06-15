@@ -208,7 +208,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             }
             let data = fetch_get(&client, &ids, &params).await?;
             if data.is_array() {
-                render::output_nests(&data, None, cfg.output)?;
+                render::output_nests(&data, None, cfg.output, false)?;
             } else {
                 render::output_nest_detail(&data, cfg.output)?;
             }
@@ -236,7 +236,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("cleanText", "true"));
             }
             let (data, meta) = fetch_children(&client, &id, &params).await?;
-            render::output_nests(&data, meta.as_ref(), cfg.output)?;
+            render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
         NestsCmd::Create {
             title,
@@ -329,7 +329,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
         NestsCmd::BulkReorder { ids } => {
             safety::enforce_read_only(g.read_only, "bulk-reorder")?;
             let data = bulk_reorder(&client, &cfg.workspace_id, &ids).await?;
-            render::output_nests(&data, None, cfg.output)?;
+            render::output_nests(&data, None, cfg.output, false)?;
         }
         NestsCmd::Label { cmd } => {
             safety::enforce_read_only(g.read_only, "nests label")?;

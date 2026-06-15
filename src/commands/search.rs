@@ -15,7 +15,7 @@ pub struct SearchArgs {
     pub r#in: Option<String>,
     #[arg(long)]
     pub limit: Option<u32>,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "in")]
     pub page: Option<u32>,
     /// Strip rich-text markup from results.
     #[arg(long)]
@@ -69,6 +69,6 @@ pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
         &extra,
     )
     .await?;
-    render::output_nests(&data, meta.as_ref(), cfg.output)?;
+    render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
     Ok(())
 }

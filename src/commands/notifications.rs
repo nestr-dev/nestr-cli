@@ -13,7 +13,7 @@ pub enum NotificationsCmd {
     /// List notifications (unread by default).
     List {
         /// all | me | relevant
-        #[arg(long)]
+        #[arg(long, value_parser = ["all", "me", "relevant"])]
         r#type: Option<String>,
         /// Filter by group (mentions, replies, direct_message, reactions, updates, governance).
         #[arg(long)]
@@ -60,6 +60,8 @@ pub async fn run(cmd: NotificationsCmd, g: &GlobalArgs) -> Result<()> {
             limit,
             skip,
         } => {
+            let skip_n = skip.unwrap_or(0);
+            let limit_n = limit;
             let limit = limit.map(|n| n.to_string());
             let skip = skip.map(|n| n.to_string());
             let mut params: Vec<(&str, &str)> = Vec::new();
@@ -99,10 +101,14 @@ pub async fn run(cmd: NotificationsCmd, g: &GlobalArgs) -> Result<()> {
                                 ]
                             })
                             .collect();
+                        let n = rows.len();
                         println!(
                             "{}",
                             render::format_table(&["", "GROUP", "TITLE", "BY", "AT"], rows)
                         );
+                        if let Some(f) = render::skip_limit_footer(skip_n, limit_n, n) {
+                            println!("{f}");
+                        }
                     }
                 }
             }

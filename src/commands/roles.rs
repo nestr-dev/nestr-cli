@@ -110,7 +110,7 @@ pub async fn run(cmd: RolesCmd, g: &GlobalArgs) -> Result<()> {
     match cmd {
         RolesCmd::List => {
             let (data, meta) = fetch_list(&client, &ws, &clean_params(cfg.output)).await?;
-            render::output_roles(&data, meta.as_ref(), cfg.output)?;
+            render::output_roles(&data, meta.as_ref(), cfg.output, false)?;
         }
         RolesCmd::Get { id } => {
             let data = fetch_get(&client, &ws, &id, &clean_params(cfg.output)).await?;

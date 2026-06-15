@@ -387,7 +387,7 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("page", p));
             }
             let (data, meta) = fetch_mine(&client, &params).await?;
-            render::output_tensions(&data, meta.as_ref(), cfg.output)?;
+            render::output_tensions(&data, meta.as_ref(), cfg.output, true)?;
         }
         TensionsCmd::AwaitingConsent { context, page } => {
             let page = page.map(|n| n.to_string());
@@ -399,7 +399,7 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("page", p));
             }
             let (data, meta) = fetch_awaiting(&client, &params).await?;
-            render::output_tensions(&data, meta.as_ref(), cfg.output)?;
+            render::output_tensions(&data, meta.as_ref(), cfg.output, true)?;
         }
         TensionsCmd::List {
             nest_id,
@@ -420,7 +420,7 @@ pub async fn run(cmd: TensionsCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("page", p));
             }
             let (data, meta) = fetch_list(&client, &nest_id, &params).await?;
-            render::output_tensions(&data, meta.as_ref(), cfg.output)?;
+            render::output_tensions(&data, meta.as_ref(), cfg.output, true)?;
         }
         TensionsCmd::Get {
             nest_id,
@@ -510,9 +510,10 @@ pub async fn fetch_parts(
     client: &NestrClient,
     nest: &str,
     tid: &str,
+    params: &[(&str, &str)],
 ) -> crate::error::Result<Value> {
     let raw: Value = client
-        .get(&format!("{}/parts", base(nest, tid)), &[])
+        .get(&format!("{}/parts", base(nest, tid)), params)
         .await?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
@@ -592,9 +593,10 @@ pub async fn fetch_changes(
     nest: &str,
     tid: &str,
     part: &str,
+    params: &[(&str, &str)],
 ) -> crate::error::Result<Value> {
     let raw: Value = client
-        .get(&format!("{}/parts/{part}/changes", base(nest, tid)), &[])
+        .get(&format!("{}/parts/{part}/changes", base(nest, tid)), params)
         .await?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
@@ -665,7 +667,8 @@ async fn run_parts(
             nest_id,
             tension_id,
         } => {
-            let data = fetch_parts(client, &nest_id, &tension_id).await?;
+            let data =
+                fetch_parts(client, &nest_id, &tension_id, &clean_params(cfg.output)).await?;
             render::output_parts(&data, cfg.output)?;
         }
         PartsCmd::Add {
@@ -791,7 +794,14 @@ async fn run_parts(
             tension_id,
             part_id,
         } => {
-            let data = fetch_changes(client, &nest_id, &tension_id, &part_id).await?;
+            let data = fetch_changes(
+                client,
+                &nest_id,
+                &tension_id,
+                &part_id,
+                &clean_params(cfg.output),
+            )
+            .await?;
             render::output_changes(&data, cfg.output)?;
         }
         PartsCmd::Children { cmd } => run_children(cmd, cfg, client, g).await?,

@@ -43,7 +43,7 @@ pub async fn run(cmd: PlanCmd, g: &GlobalArgs) -> Result<()> {
     match cmd {
         PlanCmd::Today => {
             let data = fetch_today(&client).await?;
-            render::output_nests(&data, None, cfg.output)?;
+            render::output_nests(&data, None, cfg.output, false)?;
         }
         PlanCmd::Add { ids } => {
             safety::enforce_read_only(g.read_only, "plan add")?;

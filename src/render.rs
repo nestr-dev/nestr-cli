@@ -75,7 +75,12 @@ pub fn nest_table(nests: &[CompactNest]) -> String {
 }
 
 /// Render a list of Nest-shaped objects: raw JSON, or a compact table + footers.
-pub fn output_nests(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+pub fn output_nests(
+    data: &Value,
+    meta: Option<&Value>,
+    output: OutputFormat,
+    supports_page: bool,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
@@ -85,7 +90,7 @@ pub fn output_nests(data: &Value, meta: Option<&Value>, output: OutputFormat) ->
                 return Ok(());
             }
             println!("{}", nest_table(&nests));
-            if let Some(f) = pagination_footer(meta) {
+            if let Some(f) = pagination_footer(meta, supports_page) {
                 println!("{f}");
             }
             if let Some(h) = hint_line(data) {
@@ -124,7 +129,9 @@ pub fn output_nest_detail(data: &Value, output: OutputFormat) -> Result<()> {
 }
 
 /// Build a `page x/y · N total · --page n for more` footer from a `meta` object.
-pub fn pagination_footer(meta: Option<&Value>) -> Option<String> {
+/// `supports_page` gates the `--page n for more` hint for commands without a
+/// `--page` flag (the page/total counts still print). (COR-11)
+pub fn pagination_footer(meta: Option<&Value>, supports_page: bool) -> Option<String> {
     let m = meta?;
     let page = m.get("page").and_then(Value::as_u64)?;
     let total_pages = m.get("total_pages").and_then(Value::as_u64).unwrap_or(page);
@@ -132,10 +139,31 @@ pub fn pagination_footer(meta: Option<&Value>) -> Option<String> {
     if let Some(total) = m.get("total").and_then(Value::as_u64) {
         s.push_str(&format!(" · {total} total"));
     }
-    if page < total_pages {
+    if supports_page && page < total_pages {
         s.push_str(&format!(" · --page {} for more", page + 1));
     }
     Some(s.dimmed().to_string())
+}
+
+/// Footer for skip/limit-paginated lists that return no `meta` (notifications).
+/// Prints when the page is full (rows == limit), pointing at the next `--skip`.
+/// `limit` defaults to the server's 50 when not given. (COR-10)
+pub fn skip_limit_footer(skip: u32, limit: Option<u32>, rows: usize) -> Option<String> {
+    let limit = limit.unwrap_or(50);
+    if rows as u32 == limit && limit > 0 {
+        let next = skip + limit;
+        Some(
+            format!(
+                "showing {}-{} · --skip {next} for more",
+                skip + 1,
+                skip + rows as u32
+            )
+            .dimmed()
+            .to_string(),
+        )
+    } else {
+        None
+    }
 }
 
 /// Best-effort: surface the first `hints[].url` found anywhere in the payload.
@@ -178,7 +206,12 @@ pub fn role_table(roles: &[RoleView]) -> String {
 }
 
 /// Render a list of roles/circles: raw JSON, or a compact table + footer.
-pub fn output_roles(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+pub fn output_roles(
+    data: &Value,
+    meta: Option<&Value>,
+    output: OutputFormat,
+    supports_page: bool,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
@@ -188,7 +221,7 @@ pub fn output_roles(data: &Value, meta: Option<&Value>, output: OutputFormat) ->
                 return Ok(());
             }
             println!("{}", role_table(&roles));
-            if let Some(f) = pagination_footer(meta) {
+            if let Some(f) = pagination_footer(meta, supports_page) {
                 println!("{f}");
             }
         }
@@ -316,7 +349,12 @@ pub fn tension_table(tensions: &[TensionView]) -> String {
     format_table(&["ID", "TITLE", "STATUS", "LABELS"], rows)
 }
 
-pub fn output_tensions(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+pub fn output_tensions(
+    data: &Value,
+    meta: Option<&Value>,
+    output: OutputFormat,
+    supports_page: bool,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
@@ -326,7 +364,7 @@ pub fn output_tensions(data: &Value, meta: Option<&Value>, output: OutputFormat)
                 return Ok(());
             }
             println!("{}", tension_table(&ts));
-            if let Some(f) = pagination_footer(meta) {
+            if let Some(f) = pagination_footer(meta, supports_page) {
                 println!("{f}");
             }
         }
@@ -521,7 +559,12 @@ pub fn link_table(links: &[LinkView]) -> String {
     format_table(&["ID", "TITLE", "RELATION", "DIRECTION", "LABELS"], rows)
 }
 
-pub fn output_links(data: &Value, meta: Option<&Value>, output: OutputFormat) -> Result<()> {
+pub fn output_links(
+    data: &Value,
+    meta: Option<&Value>,
+    output: OutputFormat,
+    supports_page: bool,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
@@ -531,7 +574,7 @@ pub fn output_links(data: &Value, meta: Option<&Value>, output: OutputFormat) ->
                 return Ok(());
             }
             println!("{}", link_table(&links));
-            if let Some(f) = pagination_footer(meta) {
+            if let Some(f) = pagination_footer(meta, supports_page) {
                 println!("{f}");
             }
         }
@@ -741,15 +784,33 @@ mod tests {
     #[test]
     fn pagination_footer_present_only_when_more_pages() {
         let meta = json!({"page":1,"total_pages":3,"total":57});
-        let f = pagination_footer(Some(&meta)).unwrap();
+        let f = pagination_footer(Some(&meta), true).unwrap();
         assert!(f.contains("page 1/3"));
         assert!(f.contains("57 total"));
         assert!(f.contains("--page 2"));
-        // Last page → no "for more" hint, but still a footer.
+        let suppressed = pagination_footer(Some(&meta), false).unwrap();
+        assert!(suppressed.contains("page 1/3") && !suppressed.contains("for more"));
         let last = json!({"page":3,"total_pages":3,"total":57});
-        assert!(!pagination_footer(Some(&last)).unwrap().contains("for more"));
-        // No meta → no footer.
-        assert!(pagination_footer(None).is_none());
+        assert!(!pagination_footer(Some(&last), true)
+            .unwrap()
+            .contains("for more"));
+        assert!(pagination_footer(None, true).is_none());
+    }
+
+    #[test]
+    fn skip_limit_footer_only_when_page_full() {
+        // Full page (rows == limit) → footer pointing at the next skip.
+        let f = skip_limit_footer(0, Some(50), 50).unwrap();
+        assert!(f.contains("showing 1-50") && f.contains("--skip 50"));
+        // With an offset.
+        let f2 = skip_limit_footer(50, Some(50), 50).unwrap();
+        assert!(f2.contains("showing 51-100") && f2.contains("--skip 100"));
+        // Partial page → no footer.
+        assert!(skip_limit_footer(0, Some(50), 30).is_none());
+        // Default limit (50) applied when None; full page → footer.
+        assert!(skip_limit_footer(0, None, 50).is_some());
+        // Zero limit → no footer.
+        assert!(skip_limit_footer(0, Some(0), 0).is_none());
     }
 
     #[test]

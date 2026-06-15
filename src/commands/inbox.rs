@@ -103,7 +103,7 @@ pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("completedAfter", c));
             }
             let (data, meta) = fetch_list(&client, &params).await?;
-            render::output_nests(&data, meta.as_ref(), cfg.output)?;
+            render::output_nests(&data, meta.as_ref(), cfg.output, false)?;
         }
         InboxCmd::Get { id, clean_text } => {
             let mut params: Vec<(&str, &str)> = Vec::new();
@@ -141,7 +141,7 @@ pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
         InboxCmd::Reorder { ids } => {
             safety::enforce_read_only(g.read_only, "inbox reorder")?;
             let data = reorder(&client, &ids).await?;
-            render::output_nests(&data, None, cfg.output)?;
+            render::output_nests(&data, None, cfg.output, false)?;
         }
     }
     Ok(())

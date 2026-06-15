@@ -52,7 +52,11 @@ pub enum UserGroupsCmd {
     /// Show a user's groups.
     Show { id: String },
     /// Replace a user's groups (admin).
-    Set { id: String, names: Vec<String> },
+    Set {
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        names: Vec<String>,
+    },
 }
 
 pub async fn fetch_list(
@@ -236,7 +240,7 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
         }
         UsersCmd::Roles { id } => {
             let (data, meta) = fetch_user_roles(&client, &ws, &id, &[]).await?;
-            render::output_roles(&data, meta.as_ref(), cfg.output)?;
+            render::output_roles(&data, meta.as_ref(), cfg.output, false)?;
         }
         UsersCmd::Groups { cmd } => match cmd {
             UserGroupsCmd::Show { id } => {

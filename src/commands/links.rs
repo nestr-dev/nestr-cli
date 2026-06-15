@@ -114,7 +114,7 @@ pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("page", p));
             }
             let (data, meta) = fetch_links(&client, &nest_id, relation.as_deref(), &params).await?;
-            render::output_links(&data, meta.as_ref(), cfg.output)?;
+            render::output_links(&data, meta.as_ref(), cfg.output, true)?;
         }
         LinksCmd::Add {
             nest_id,

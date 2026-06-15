@@ -158,7 +158,7 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("page", p));
             }
             let (data, meta) = fetch_list(&client, &params).await?;
-            render::output_nests(&data, meta.as_ref(), cfg.output)?;
+            render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
         WorkspacesCmd::Get { id } => {
             let data = fetch_get(&client, &id).await?;
