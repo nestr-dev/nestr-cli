@@ -205,7 +205,11 @@ fn send_http_response(mut stream: &TcpStream, status: u16, body: &str) {
 }
 
 async fn post_token_form(token_url: &str, form: &[(&str, &str)]) -> Result<TokenResponse> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .context("building token client")?;
     let resp = client
         .post(token_url)
         .header("X-Client-Consumer", CLIENT_CONSUMER)

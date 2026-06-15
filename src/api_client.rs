@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use reqwest::{header, Client, Method, StatusCode};
 use rustls;
@@ -96,6 +97,9 @@ impl NestrClient {
         let inner = Client::builder()
             .default_headers(headers)
             .user_agent(concat!("nestr-cli/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self {
             inner,
