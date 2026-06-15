@@ -115,7 +115,7 @@ fn render_post_one(data: &Value, output: crate::config::OutputFormat) -> Result<
         crate::config::OutputFormat::Json => print_json(data)?,
         crate::config::OutputFormat::Text => {
             let p: PostView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("{}  [{}]", p.text(), p.id);
+            println!("{}  [{}]", render::clean_text(&p.text()), p.id);
         }
     }
     Ok(())

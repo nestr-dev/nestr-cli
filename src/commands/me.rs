@@ -25,7 +25,11 @@ pub async fn run(g: &GlobalArgs) -> Result<()> {
             .unwrap_or("-");
         let username = v.get("username").and_then(|u| u.as_str()).unwrap_or("-");
         let id = v.get("_id").and_then(|i| i.as_str()).unwrap_or("-");
-        println!("{name}  <{username}>  [{id}]");
+        println!(
+            "{}  <{}>  [{id}]",
+            render::clean_text(name),
+            render::clean_text(username)
+        );
         println!(
             "profile: {}  workspace: {}",
             cfg.profile_name, cfg.workspace_id

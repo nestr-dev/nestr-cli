@@ -159,7 +159,7 @@ fn render_group_names(data: &Value, output: OutputFormat) -> Result<()> {
                 render::print_no_results("No groups.");
             } else {
                 for n in names {
-                    println!("{n}");
+                    println!("{}", render::clean_text(&n));
                 }
             }
         }

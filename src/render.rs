@@ -26,7 +26,7 @@ pub fn format_table(headers: &[&str], rows: Vec<Vec<String>>) -> String {
     let mut builder = Builder::default();
     builder.push_record(headers.iter().map(|h| h.to_string()));
     for row in rows {
-        builder.push_record(row);
+        builder.push_record(row.iter().map(|c| clean_text(c)));
     }
     builder.build().to_string()
 }
@@ -102,12 +102,12 @@ pub fn output_nest_detail(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let n: CompactNest = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("{}  [{}]", n.title, n.id);
+            println!("{}  [{}]", clean_text(&n.title), n.id);
             if let Some(p) = n.purpose.as_deref().filter(|s| !s.is_empty()) {
-                println!("purpose: {p}");
+                println!("purpose: {}", clean_text(p));
             }
             if !n.labels.is_empty() {
-                println!("labels: {}", n.labels_str());
+                println!("labels: {}", clean_text(&n.labels_str()));
             }
             if let Some(d) = &n.due {
                 println!("due: {d}");
@@ -157,7 +157,7 @@ pub fn hint_line(data: &Value) -> Option<String> {
             _ => None,
         }
     }
-    find(data).map(|u| format!("next: {u}").dimmed().to_string())
+    find(data).map(|u| format!("next: {}", clean_text(&u)).dimmed().to_string())
 }
 
 /// Compact table for roles/circles. ACC/DOM are counts; full titles live in `role_detail`.
@@ -196,6 +196,22 @@ pub fn output_roles(data: &Value, meta: Option<&Value>, output: OutputFormat) ->
     Ok(())
 }
 
+/// Drop ANSI/terminal control sequences from an API-derived string before it is
+/// printed to a terminal. Keeps `\n` and `\t`; removes ESC, BEL, CSI/OSC bytes,
+/// bare CR, etc. Guards against OSC-52 clipboard writes, title spoofing, and
+/// cursor/erase tricks authored by other workspace members (SEC-1).
+fn sanitize(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .collect()
+}
+
+/// The uniform cleaner for every API string shown in text mode: strip terminal
+/// control sequences, then strip HTML tags and collapse whitespace.
+pub fn clean_text(s: &str) -> String {
+    strip_html(&sanitize(s))
+}
+
 /// Strip HTML tags and collapse whitespace from rich-text titles for terminal display.
 /// Accountability/domain titles can be HTML that the server's `cleanText` doesn't touch.
 fn strip_html(s: &str) -> String {
@@ -218,9 +234,9 @@ pub fn role_detail(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let r: RoleView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("{}  [{}]", r.title, r.id);
+            println!("{}  [{}]", clean_text(&r.title), r.id);
             if let Some(p) = r.purpose.as_deref().filter(|s| !s.is_empty()) {
-                println!("purpose: {p}");
+                println!("purpose: {}", clean_text(p));
             }
             if let Some(pid) = &r.parent_id {
                 println!("parent: {pid}");
@@ -229,18 +245,18 @@ pub fn role_detail(data: &Value, output: OutputFormat) -> Result<()> {
             if !acc.is_empty() {
                 println!("accountabilities:");
                 for a in acc {
-                    println!("  - {}", strip_html(&a));
+                    println!("  - {}", clean_text(&a));
                 }
             }
             let dom = r.domain_titles();
             if !dom.is_empty() {
                 println!("domains:");
                 for d in dom {
-                    println!("  - {}", strip_html(&d));
+                    println!("  - {}", clean_text(&d));
                 }
             }
             if !r.labels.is_empty() {
-                println!("labels: {}", r.labels_str());
+                println!("labels: {}", clean_text(&r.labels_str()));
             }
         }
     }
@@ -323,12 +339,12 @@ pub fn tension_detail(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let t: TensionView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("{}  [{}]", t.title, t.id);
+            println!("{}  [{}]", clean_text(&t.title), t.id);
             if let Some(s) = &t.status {
-                println!("status: {s}");
+                println!("status: {}", clean_text(s));
             }
             if let Some(d) = t.description.as_deref().filter(|s| !s.is_empty()) {
-                println!("description: {}", strip_html(d));
+                println!("description: {}", clean_text(d));
             }
             for (label, key) in [("feeling", "tension.feeling"), ("needs", "tension.needs")] {
                 if let Some(v) = data
@@ -337,12 +353,15 @@ pub fn tension_detail(data: &Value, output: OutputFormat) -> Result<()> {
                     .and_then(Value::as_str)
                 {
                     if !v.is_empty() {
-                        println!("{label}: {}", strip_html(v));
+                        println!("{label}: {}", clean_text(v));
                     }
                 }
             }
             if !t.labels.is_empty() {
-                println!("labels: {}", crate::views::join_labels(&t.labels));
+                println!(
+                    "labels: {}",
+                    clean_text(&crate::views::join_labels(&t.labels))
+                );
             }
         }
     }
@@ -371,7 +390,7 @@ pub fn output_parts(data: &Value, output: OutputFormat) -> Result<()> {
                     let title = item
                         .and_then(|i| i.get("title"))
                         .and_then(Value::as_str)
-                        .map(strip_html)
+                        .map(clean_text)
                         .or_else(|| p.title.clone())
                         .unwrap_or_default();
                     let labels = item
@@ -394,7 +413,7 @@ pub fn output_parts(data: &Value, output: OutputFormat) -> Result<()> {
 fn value_display(v: &Value) -> String {
     match v {
         Value::Null => "—".to_string(),
-        Value::String(s) => strip_html(s),
+        Value::String(s) => clean_text(s),
         Value::Array(a) => a.iter().map(value_display).collect::<Vec<_>>().join(", "),
         other => other.to_string(),
     }
@@ -434,17 +453,17 @@ pub fn output_status(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let s: StatusView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("status: {}", s.status.as_deref().unwrap_or("-"));
+            println!("status: {}", clean_text(s.status.as_deref().unwrap_or("-")));
             for r in &s.responses {
                 println!(
                     "  {}: {} {}",
                     r.user_id.as_deref().unwrap_or("-"),
-                    r.response.as_deref().unwrap_or("none"),
+                    clean_text(r.response.as_deref().unwrap_or("none")),
                     r.voted_at.as_deref().unwrap_or("")
                 );
             }
             if let Some(a) = &s.autoapprove {
-                println!("autoapprove: {a}");
+                println!("autoapprove: {}", clean_text(a));
             }
         }
     }
@@ -465,7 +484,7 @@ pub fn output_children(data: &Value, output: OutputFormat) -> Result<()> {
                 .map(|c| {
                     vec![
                         c.id.clone(),
-                        c.title.clone().map(|t| strip_html(&t)).unwrap_or_default(),
+                        c.title.clone().map(|t| clean_text(&t)).unwrap_or_default(),
                         crate::views::join_labels(&c.labels),
                         c.link_id.clone().unwrap_or_default(),
                     ]
@@ -559,11 +578,11 @@ pub fn insight_detail(data: &Value, output: OutputFormat) -> Result<()> {
             let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
             println!(
                 "{}  [{}]",
-                i.title.clone().unwrap_or_default(),
-                i.type_.clone().unwrap_or_default()
+                clean_text(&i.title.clone().unwrap_or_default()),
+                clean_text(&i.type_.clone().unwrap_or_default())
             );
             if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
-                println!("description: {}", strip_html(d));
+                println!("description: {}", clean_text(d));
             }
             println!(
                 "current: {}  (was {})",
@@ -571,7 +590,7 @@ pub fn insight_detail(data: &Value, output: OutputFormat) -> Result<()> {
                 fmt_num(i.compare_value)
             );
             if let Some(g) = &i.goal {
-                println!("goal: {g}");
+                println!("goal: {}", clean_text(g));
             }
         }
     }
@@ -642,14 +661,18 @@ pub fn webhook_detail(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let w: WebhookView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!("{}  [{}]", w.url.clone().unwrap_or_default(), w.id);
+            println!(
+                "{}  [{}]",
+                clean_text(&w.url.clone().unwrap_or_default()),
+                w.id
+            );
             println!(
                 "{} {}",
-                w.type_.clone().unwrap_or_default(),
-                w.event.clone().unwrap_or_default()
+                clean_text(&w.type_.clone().unwrap_or_default()),
+                clean_text(&w.event.clone().unwrap_or_default())
             );
             if let Some(l) = &w.label {
-                println!("label: {l}");
+                println!("label: {}", clean_text(l));
             }
             if let Some(a) = &w.ancestor_id {
                 println!("ancestor: {a}");
@@ -853,5 +876,31 @@ mod tests {
                 && out.contains("nest")
                 && out.contains("create")
         );
+    }
+
+    #[test]
+    fn sanitize_strips_control_but_keeps_tab_newline() {
+        let dirty = "a\u{1b}]0;pwn\u{07}b\tc\nd\u{1b}[31mx";
+        let clean = sanitize(dirty);
+        assert!(!clean.contains('\u{1b}'), "ESC must be removed");
+        assert!(!clean.contains('\u{07}'), "BEL must be removed");
+        assert!(
+            clean.contains('\t') && clean.contains('\n'),
+            "tab/newline kept"
+        );
+    }
+
+    #[test]
+    fn clean_text_strips_escapes_and_html() {
+        let v = clean_text("evil\u{1b}]0;pwn\u{07}<b>title</b>");
+        assert!(!v.contains('\u{1b}') && !v.contains('\u{07}'));
+        assert!(!v.contains('<') && !v.contains('>'));
+        assert!(v.contains("title"));
+    }
+
+    #[test]
+    fn format_table_cleans_cell_escapes() {
+        let out = format_table(&["T"], vec![vec!["x\u{1b}]0;pwn\u{07}y".to_string()]]);
+        assert!(!out.contains('\u{1b}') && !out.contains('\u{07}'));
     }
 }
