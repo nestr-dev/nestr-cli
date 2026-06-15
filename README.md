@@ -9,10 +9,21 @@ A fast, composable command-line interface for [Nestr](https://nestr.io) — buil
 ### Quick install (macOS / Linux)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/nestr/nestr-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/nestr-dev/nestr-cli/main/install.sh | sh
 ```
 
 Downloads the latest release for your platform, verifies its SHA-256 checksum (and, if `cosign` is installed, its keyless signature), and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` (the bare version, no `v` prefix) or `NESTR_INSTALL_DIR=/path/to/bin`.
+
+### Agent skills (Claude Code, Cursor, Copilot, …)
+
+Teach your coding agent the Nestr workflows — install the bundled [skills](skills/) with one command:
+
+```sh
+npx skills add nestr-dev/nestr-cli                          # choose skills interactively
+npx skills add nestr-dev/nestr-cli --all -a claude-code -y  # all five, into Claude Code
+```
+
+Powered by [`skills`](https://github.com/vercel-labs/skills) (works across 40+ agents). The skills drive the `nestr` CLI, so install it (above) too.
 
 ### From source
 
@@ -23,7 +34,7 @@ nestr --help
 
 ### Prebuilt binaries
 
-Download an archive for your platform from the [releases page](https://github.com/nestr/nestr-cli/releases). Every release ships:
+Download an archive for your platform from the [releases page](https://github.com/nestr-dev/nestr-cli/releases). Every release ships:
 
 - `nestr-<version>-<target>.tar.gz` (`.zip` on Windows) for five targets — macOS (Intel + Apple Silicon), Linux musl (x86_64 + aarch64), Windows x86_64;
 - `checksums-sha256.txt` plus a keyless [cosign](https://github.com/sigstore/cosign) signature (`.sig`) and certificate (`.pem`);
@@ -39,7 +50,7 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 cosign verify-blob \
   --certificate checksums-sha256.txt.pem \
   --signature checksums-sha256.txt.sig \
-  --certificate-identity-regexp '^https://github\.com/nestr/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github\.com/nestr-dev/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums-sha256.txt
 ```
