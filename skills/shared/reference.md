@@ -8,6 +8,10 @@ Cross-cutting setup and conventions for every `nestr` skill.
 nestr profiles add                       # interactive: OAuth login or paste an API key
 nestr profiles list                      # configured profiles
 nestr profiles use <name>                # set the default profile
+nestr profiles remove <name>             # delete a profile + its credentials
+nestr auth login [profile]               # (re)run the browser OAuth login
+nestr auth status [profile]              # show resolved profile + token validity
+nestr auth logout [profile]              # invalidate + clear local credentials
 nestr me                                 # verify auth + show the active identity
 ```
 
@@ -16,11 +20,11 @@ environment (prod / staging / local), so `prod`, `staging`, and `local` profiles
 sit side by side. Credentials live in the OS keyring or a `0600` file.
 
 **Env overrides** (precedence: CLI flags > env > profile > defaults):
-`NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`, `NESTR_WORKSPACE`.
+`NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`.
 
 ## Global flags
 
-- `-p, --profile <name>` — pick a profile; repeat to fan out across workspaces.
+- `-p, --profile <name>` — pick a profile for this invocation.
 - `--api-key <key>` / `--host <url>` — override the profile's credential / host.
 - `-o, --output text|json` — `text` (tables) or `json` (raw, for `jq`).
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).
@@ -32,6 +36,8 @@ Everything in Nestr is a **Nest** — circles, roles, projects, todos, tensions,
 inbox items, and comments are all nests distinguished by labels. Responses come in
 a few shapes (`{status, data, …}`, a bare array, or a bare object); `-o json`
 always prints the raw unwrapped data.
+
+List commands paginate with `--limit` and `--page` (page-based); pass `--page N` to fetch the next page when the footer shows more are available.
 
 ## Command map
 

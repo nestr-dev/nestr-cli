@@ -51,7 +51,7 @@ nestr profiles add            # configure a profile (OAuth login or API key)
 nestr me                      # verify authentication + show your identity
 ```
 
-A **profile = a workspace + an identity**. Add several (`prod`, `staging`, `local`), switch with `nestr profiles use <name>`, or fan a read-only query out across all of them with repeated `-p`.
+A **profile = a workspace + an identity**. Add several (`prod`, `staging`, `local`) and switch with `nestr profiles use <name>`.
 
 Then the everyday loop:
 
@@ -67,13 +67,13 @@ nestr work                    # open projects + todos
 
 | Flag | Purpose |
 |---|---|
-| `-p, --profile <name>` | pick a profile; repeat to fan out across workspaces |
-| `--api-key <key>` / `--host <url>` | override the profile's credential / host |
+| `-p, --profile <name>` | pick a profile for this invocation |
+| `--api-key <key>` / `--host <url>` | override the profile's credential / host. Prefer `NESTR_API_KEY` — `--api-key` is visible in shell history and `ps`. |
 | `-o, --output text\|json` | `text` tables (default) or raw `json` for `jq` |
 | `--yes` | skip destructive-action confirmations (required for agents/scripts) |
 | `--read-only` | hard-block every write (also `NESTR_READ_ONLY=1`) |
 
-Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`, `NESTR_WORKSPACE`. Credentials live in the OS keyring, or a `0600` file on platforms without one (e.g. Linux musl builds).
+Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`. Credentials live in the OS keyring, or a `0600` file on platforms without one (e.g. Linux musl builds).
 
 ## Commands
 

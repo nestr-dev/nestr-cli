@@ -62,7 +62,8 @@ struct Cli {
     )]
     profile: Option<String>,
 
-    /// API key (overrides the profile credential).
+    /// API key (overrides the profile credential). Prefer NESTR_API_KEY: a key
+    /// passed here is visible in shell history and process listings.
     #[arg(
         long,
         global = true,
