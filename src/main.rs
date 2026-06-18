@@ -73,7 +73,7 @@ struct Cli {
     )]
     api_key: Option<String>,
 
-    /// Host override, e.g. http://localhost:4001 (overrides the profile host).
+    /// Host override (overrides the profile host).
     #[arg(
         long,
         global = true,
