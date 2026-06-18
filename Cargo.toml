@@ -30,7 +30,7 @@ base64 = "0.22"
 open = "5"
 url = "2"
 colored = "3"
-tabled = { version = "0.20", features = ["ansi"] }
+tabled = { version = "0.21", features = ["ansi"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
