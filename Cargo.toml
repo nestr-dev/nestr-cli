@@ -46,6 +46,11 @@ keyring = { version = "3", features = ["sync-secret-service"] }
 wiremock = "0.6"
 tempfile = "3"
 
+[profile.dev]
+# Keep readable backtraces but drop full DWARF, which dominates target/ size
+# (27 integration-test binaries each statically link the whole dep graph).
+debug = "line-tables-only"
+
 [profile.release]
 strip = true
 lto = true
