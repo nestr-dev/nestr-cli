@@ -37,19 +37,18 @@ nestr --help
 Download an archive for your platform from the [releases page](https://github.com/nestr-dev/nestr-cli/releases). Every release ships:
 
 - `nestr-<version>-<target>.tar.gz` (`.zip` on Windows) for five targets — macOS (Intel + Apple Silicon), Linux musl (x86_64 + aarch64), Windows x86_64;
-- `checksums-sha256.txt` plus a keyless [cosign](https://github.com/sigstore/cosign) signature (`.sig`) and certificate (`.pem`);
-- a CycloneDX SBOM (`nestr-sbom.cyclonedx.json`) — its own checksum is listed in `checksums-sha256.txt`, so the signature below covers it too.
+- `checksums-sha256.txt` plus a keyless [cosign](https://github.com/sigstore/cosign) signing bundle (`checksums-sha256.txt.sigstore.json`, signature + certificate + transparency-log entry in one file);
+- a CycloneDX SBOM (`nestr-sbom.cyclonedx.json`) — its own checksum is listed in `checksums-sha256.txt`, so the bundle below covers it too.
 
-Verify before running (optional but encouraged) — check the checksum, then confirm the checksums file was signed by this repo's release workflow:
+Verify before running (optional but encouraged) — check the checksum, then confirm the checksums file was signed by this repo's release workflow (needs cosign v3+):
 
 ```sh
 # 1. Verify checksums (Linux). On macOS: shasum -a 256 -c checksums-sha256.txt --ignore-missing
 sha256sum -c checksums-sha256.txt --ignore-missing
 
-# 2. Verify the signature on the checksums file
+# 2. Verify the signing bundle on the checksums file
 cosign verify-blob \
-  --certificate checksums-sha256.txt.pem \
-  --signature checksums-sha256.txt.sig \
+  --bundle checksums-sha256.txt.sigstore.json \
   --certificate-identity-regexp '^https://github\.com/nestr-dev/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums-sha256.txt

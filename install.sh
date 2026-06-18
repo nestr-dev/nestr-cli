@@ -44,11 +44,9 @@ main() {
     # Opportunistic signature verification: if cosign is installed, verify the
     # checksums file's keyless signature before trusting it. (SEC-13)
     if command -v cosign >/dev/null 2>&1; then
-        curl -fsSL "${base}/checksums-sha256.txt.sig" -o "${tmp}/checksums.txt.sig"
-        curl -fsSL "${base}/checksums-sha256.txt.pem" -o "${tmp}/checksums.txt.pem"
+        curl -fsSL "${base}/checksums-sha256.txt.sigstore.json" -o "${tmp}/checksums.sigstore.json"
         if cosign verify-blob \
-            --certificate "${tmp}/checksums.txt.pem" \
-            --signature "${tmp}/checksums.txt.sig" \
+            --bundle "${tmp}/checksums.sigstore.json" \
             --certificate-identity-regexp '^https://github\.com/nestr-dev/nestr-cli/\.github/workflows/release\.yml@refs/tags/v' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${tmp}/checksums.txt" >/dev/null 2>&1; then
