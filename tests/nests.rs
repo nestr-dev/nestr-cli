@@ -87,6 +87,66 @@ async fn bulk_reorder_sends_bare_array_body() {
 }
 
 #[tokio::test]
+async fn label_add_rejects_a_second_prime_before_writing() {
+    let server = MockServer::start().await;
+    // The nest is already a role; adding `project` must be refused after the GET and
+    // before any add_label PATCH fires.
+    Mock::given(method("GET"))
+        .and(path("/nests/n1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n1","title":"Facilitator","labels":["role"]}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/n1/add_label/project"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = nests::ensure_prime_compatible(&client, "n1", "project")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("already a 'role'"),
+        "expected a one-prime error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn label_add_allows_a_prime_when_the_nest_has_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n2","title":"Loose todo","labels":["now"]}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    nests::ensure_prime_compatible(&client, "n2", "project")
+        .await
+        .expect("adding a prime to a nest with no prime should be allowed");
+}
+
+#[tokio::test]
+async fn label_add_of_a_non_prime_skips_the_fetch() {
+    // A non-prime label never conflicts, so the guard must not even GET the nest.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n3"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    nests::ensure_prime_compatible(&client, "n3", "urgent")
+        .await
+        .expect("adding a non-prime label should be allowed without a fetch");
+}
+
+#[tokio::test]
 async fn delete_hits_delete_path() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))

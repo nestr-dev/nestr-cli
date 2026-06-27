@@ -36,36 +36,53 @@ pub enum NestsCmd {
     },
     /// Create a nest.
     Create {
+        /// The nest's name — what shows in lists.
         #[arg(long)]
         title: String,
+        /// Parent nest id. Makes this a child/subtask of that nest (omit for a top-level nest).
         #[arg(long)]
         parent: Option<String>,
+        /// One-line statement of *why* this exists. Optional for a project (inherited from
+        /// the parent if unset); central for circles and roles. Keep it to a single line —
+        /// the body goes in --description, never here.
         #[arg(long)]
         purpose: Option<String>,
+        /// The body: the actual details/content of the nest.
         #[arg(long)]
         description: Option<String>,
-        /// Label code (repeatable).
+        /// Prime label sets what the nest *is*: project, goal, result, checklist, meeting,
+        /// metric, feedback, circle, role, anchor-circle, tension. Omit for a plain todo.
+        /// Repeatable, but at most one prime label (others may be free-form, e.g. urgent).
         #[arg(long = "label")]
         labels: Vec<String>,
+        /// Due date, ISO format (e.g. 2026-07-01).
         #[arg(long)]
         due: Option<String>,
     },
     /// Update fields on a nest.
     Update {
         id: String,
+        /// The nest's name.
         #[arg(long)]
         title: Option<String>,
+        /// One-line *why* (inherited from the parent if unset). Body text goes in --description.
         #[arg(long)]
         purpose: Option<String>,
+        /// The body: the actual details/content of the nest.
         #[arg(long)]
         description: Option<String>,
+        /// Due date, ISO format (e.g. 2026-07-01).
         #[arg(long)]
         due: Option<String>,
+        /// Mark the nest done (or not).
         #[arg(long)]
         completed: Option<bool>,
+        /// Move the nest under a new parent id.
         #[arg(long)]
         parent: Option<String>,
-        /// Replace the label set (repeatable).
+        /// Replace the label set (repeatable) — sends the full set, not a delta, so re-list
+        /// any labels you want to keep. At most one prime label. To toggle a single label
+        /// without touching the rest, use `nests label add/remove`.
         #[arg(long = "label")]
         labels: Vec<String>,
     },
@@ -185,6 +202,23 @@ pub async fn set_label(
         .await?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
+}
+
+/// Guard `nests label add` so it can't give a nest a second prime label. When the label
+/// being added is a prime, fetch the nest and reject early if it already carries a different
+/// prime — mirroring the one-prime rule that `create`/`update --label` enforce. Adding a
+/// non-prime label skips the fetch and is always allowed.
+pub async fn ensure_prime_compatible(client: &NestrClient, id: &str, label_id: &str) -> Result<()> {
+    if !validation::is_prime(label_id) {
+        return Ok(());
+    }
+    let nest = fetch_get(client, id, &[]).await?;
+    let existing = nest
+        .get("labels")
+        .and_then(Value::as_array)
+        .map(|a| crate::views::label_codes(a))
+        .unwrap_or_default();
+    validation::validate_added_prime(&existing, label_id)
 }
 
 pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
@@ -333,11 +367,15 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
         }
         NestsCmd::Label { cmd } => {
             safety::enforce_read_only(g.read_only, "nests label")?;
-            let (id, label_id, add) = match cmd {
-                LabelCmd::Add { id, label_id } => (id, label_id, true),
-                LabelCmd::Remove { id, label_id } => (id, label_id, false),
+            let data = match cmd {
+                LabelCmd::Add { id, label_id } => {
+                    ensure_prime_compatible(&client, &id, &label_id).await?;
+                    set_label(&client, &id, &label_id, true).await?
+                }
+                LabelCmd::Remove { id, label_id } => {
+                    set_label(&client, &id, &label_id, false).await?
+                }
             };
-            let data = set_label(&client, &id, &label_id, add).await?;
             render::output_nest_detail(&data, cfg.output)?;
         }
     }

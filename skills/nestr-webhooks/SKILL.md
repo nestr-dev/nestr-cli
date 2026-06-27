@@ -7,8 +7,13 @@ description: Use when managing Nestr workspace webhooks from the terminal — li
 
 A **webhook** subscribes an external URL to workspace events — when a nest or
 comment is created, updated, or deleted, Nestr POSTs to your URL. Managing webhooks
-is **admin-only**. See [`../shared/reference.md`](../shared/reference.md) for
-profiles and global flags.
+is **admin-only** — a non-admin token gets a 403.
+
+First run `nestr profiles add` (OAuth or API key) — a profile pairs a **workspace**
+with an **identity**. Global flags on every command: `-p/--profile`, `-o text|json`,
+`--read-only` (block writes), and `--yes` (skip write confirmations; required for
+agents). Full setup, env overrides, and the command map:
+[shared/reference.md](https://github.com/nestr-dev/nestr-cli/blob/main/skills/shared/reference.md).
 
 ## List & inspect
 
@@ -25,10 +30,13 @@ nestr webhooks create --url https://example.com/hook --type comment --event upda
   --label urgent --ancestor <nestId>
 ```
 
+- `--url` — the endpoint Nestr POSTs to (**required**).
 - `--type` — `nest` or `comment`.
 - `--event` — `create`, `update`, or `delete`.
 - `--label` — only fire for items carrying this label (optional).
 - `--ancestor` — only fire for events under this nest (optional).
+
+Creating a duplicate subscription (same url + type + event) returns a 400.
 
 ## Delete (admin)
 

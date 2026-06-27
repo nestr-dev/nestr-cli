@@ -33,12 +33,51 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 
 ## The model
 
-Everything in Nestr is a **Nest** — circles, roles, projects, todos, tensions,
-inbox items, and comments are all nests distinguished by labels. Responses come in
-a few shapes (`{status, data, …}`, a bare array, or a bare object); `-o json`
-always prints the raw unwrapped data.
+Everything in Nestr is a **Nest**. What a nest *is* is set by exactly **one prime
+label** (see below): circles, roles, projects, goals, and tensions are all nests
+carrying their prime label, and a nest with no prime label is a plain todo. Comments
+and inbox items are lighter nests of their own. Responses come in a few shapes
+(`{status, data, …}`, a bare array, or a bare object); `-o json` always prints the
+raw unwrapped data.
 
-List commands paginate with `--limit` and `--page` (page-based); pass `--page N` to fetch the next page when the footer shows more are available.
+Most list commands paginate with `--limit` and `--page` (page-based); pass `--page N`
+to fetch the next page when the footer shows more. (`notifications list` is the
+exception — it pages with `--limit`/`--skip`.)
+
+## What a nest is
+
+What a nest *is* is set by exactly **one prime label**; the CLI rejects two or more
+("A nest can have only one prime label"). A nest with **no** prime label is a plain
+todo. The 11 prime label codes — pass these to `--label`:
+
+| code | what it is |
+|---|---|
+| `project` | a project (holds child todos/subtasks) |
+| `goal` | a goal / objective |
+| `result` | a key result |
+| `metric` | a tracked metric |
+| `checklist` | a (recurring) checklist |
+| `meeting` | a meeting |
+| `feedback` | a feedback item |
+| `circle` | an organizational circle |
+| `role` | a role within a circle |
+| `anchor-circle` | the top-level anchor circle |
+| `tension` | a governance tension |
+
+Other labels (e.g. `urgent`, `now`) are free-form, not prime — discover them with
+`nestr labels list`. `now` is the label `plan add`/`plan remove` toggle.
+
+## Purpose vs description
+
+Two distinct fields on nests, circles, roles, and tension parts:
+
+- **`--purpose`** — a single-line statement of *why* the thing exists. Central for
+  circles and roles, optional-but-encouraged for a project. Purpose is **inherited**:
+  a nest with no purpose of its own shows its parent's. Keep it to one line.
+- **`--description`** — the *body*: the actual details/content.
+- **`--due`** — a date, ISO format (e.g. `2026-07-01`).
+
+Never put body text in `--purpose` — that is the classic Nestr mistake.
 
 ## Command map
 
