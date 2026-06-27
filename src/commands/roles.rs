@@ -106,7 +106,7 @@ fn clean_params(output: OutputFormat) -> Vec<(&'static str, &'static str)> {
 
 pub async fn run(cmd: RolesCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     match cmd {
         RolesCmd::List => {
             let (data, meta) = fetch_list(&client, &ws, &clean_params(cfg.output)).await?;

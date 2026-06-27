@@ -53,8 +53,6 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_token_url: Option<String>,
@@ -330,12 +328,38 @@ pub struct ResolvedConfig {
     pub refresh: Option<crate::oauth::ReactiveRefresh>,
 }
 
+impl ResolvedConfig {
+    /// The active workspace id, or a clear error when none is set — i.e. a
+    /// full-account profile that hasn't selected a workspace. Workspace-scoped
+    /// commands call this so they fail with guidance instead of a malformed path.
+    pub fn require_workspace(&self) -> Result<&str> {
+        if self.workspace_id.is_empty() {
+            anyhow::bail!(
+                "profile '{}' has no active workspace. Select one with \
+                 `nestr workspaces use <id>` (list them with `nestr workspaces list`), \
+                 or pass --workspace <id>.",
+                self.profile_name
+            );
+        }
+        Ok(&self.workspace_id)
+    }
+}
+
+/// The profile name that would be used: CLI override > `NESTR_PROFILE` > default.
+pub fn active_profile_name(profile_override: Option<&str>) -> String {
+    profile_override
+        .map(str::to_string)
+        .or_else(|| std::env::var("NESTR_PROFILE").ok())
+        .unwrap_or_else(|| load_config().unwrap_or_default().default_profile)
+}
+
 /// Resolve the active profile into a ready-to-use config.
-/// `--api-key` / `NESTR_API_KEY` / `--host` overrides are applied.
+/// `--api-key` / `NESTR_API_KEY` / `--host` / `--workspace` overrides are applied.
 pub async fn resolve(
     profile_override: Option<&str>,
     api_key_flag: Option<&str>,
     host_flag: Option<&str>,
+    workspace_flag: Option<&str>,
     output_flag: Option<OutputFormat>,
 ) -> Result<ResolvedConfig> {
     let global = load_config().unwrap_or_default();
@@ -416,7 +440,9 @@ pub async fn resolve(
         bearer,
         host: profile.host.clone(),
         api_base: profile.api_base(),
-        workspace_id: profile.workspace_id.clone(),
+        workspace_id: workspace_flag
+            .map(str::to_string)
+            .unwrap_or_else(|| profile.workspace_id.clone()),
         output,
         refresh,
     })
@@ -458,6 +484,22 @@ mod tests {
         assert_eq!(p.authorize_url(), "https://x/a");
     }
 
+    #[test]
+    fn require_workspace_errors_when_empty() {
+        let mut cfg = ResolvedConfig {
+            profile_name: "p".to_string(),
+            bearer: "b".to_string(),
+            host: "https://x".to_string(),
+            api_base: "https://x/api".to_string(),
+            workspace_id: String::new(),
+            output: OutputFormat::Text,
+            refresh: None,
+        };
+        assert!(cfg.require_workspace().is_err());
+        cfg.workspace_id = "ws1".to_string();
+        assert_eq!(cfg.require_workspace().unwrap(), "ws1");
+    }
+
     fn test_profile(host: &str) -> Profile {
         Profile {
             auth: AuthKind::ApiKey,
@@ -465,7 +507,6 @@ mod tests {
             host: host.to_string(),
             workspace_id: "ws1".to_string(),
             api_key: None,
-            label: None,
             oauth_client_id: None,
             oauth_token_url: None,
             oauth_authorize_url: None,

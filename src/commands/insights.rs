@@ -75,7 +75,7 @@ pub async fn fetch_history(
 
 pub async fn run(cmd: InsightsCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     match cmd {
         InsightsCmd::List {
             user,

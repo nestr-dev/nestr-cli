@@ -1,10 +1,10 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Subcommand;
 use serde_json::Value;
 
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
-use crate::config::OutputFormat;
+use crate::config::{self, OutputFormat};
 use crate::render::{self, print_json};
 use crate::safety;
 use crate::views::AppView;
@@ -42,6 +42,11 @@ pub enum WorkspacesCmd {
     Apps {
         #[command(subcommand)]
         cmd: Option<AppsCmd>,
+    },
+    /// Pin the active workspace for this profile (handy for full-account profiles).
+    Use {
+        /// Workspace id (see `nestr workspaces list`).
+        id: String,
     },
 }
 
@@ -199,16 +204,36 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
         }
         WorkspacesCmd::Apps { cmd } => match cmd {
             None => {
-                let data = fetch_apps(&client, &cfg.workspace_id).await?;
+                let data = fetch_apps(&client, cfg.require_workspace()?).await?;
                 render_apps(&data, cfg.output)?;
             }
             Some(AppsCmd::Set { app_id, state }) => {
                 safety::enforce_read_only(g.read_only, "workspaces apps set")?;
                 let enable = state == "on";
-                let data = set_app(&client, &cfg.workspace_id, &app_id, enable).await?;
+                let data = set_app(&client, cfg.require_workspace()?, &app_id, enable).await?;
                 render_apps(&data, cfg.output)?;
             }
         },
+        WorkspacesCmd::Use { id } => {
+            // Validate the id is one this account can see, then pin it to the profile.
+            let (data, _) = fetch_list(&client, &[]).await?;
+            let known = data.as_array().is_some_and(|a| {
+                a.iter()
+                    .any(|w| w.get("_id").and_then(|v| v.as_str()) == Some(id.as_str()))
+            });
+            if !known {
+                bail!(
+                    "workspace '{id}' is not one of your workspaces (run `nestr workspaces list`)."
+                );
+            }
+            let mut profile = config::load_profile(&cfg.profile_name)?;
+            profile.workspace_id = id.clone();
+            config::save_profile(&cfg.profile_name, &profile)?;
+            println!(
+                "Active workspace for profile '{}' set to {id}.",
+                cfg.profile_name
+            );
+        }
     }
     Ok(())
 }

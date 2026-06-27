@@ -30,7 +30,7 @@ fn section(data: &Value, key: &str, heading: &str) {
 
 pub async fn run(g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let data = fetch_work(&client, &cfg.workspace_id).await?;
+    let data = fetch_work(&client, cfg.require_workspace()?).await?;
     match cfg.output {
         crate::config::OutputFormat::Json => print_json(&data)?,
         crate::config::OutputFormat::Text => {

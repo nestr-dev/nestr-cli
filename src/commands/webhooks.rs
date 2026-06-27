@@ -78,7 +78,7 @@ pub async fn delete_webhook(
 
 pub async fn run(cmd: WebhooksCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     match cmd {
         WebhooksCmd::List => {
             let data = fetch_list(&client, &ws).await?;

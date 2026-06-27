@@ -33,6 +33,7 @@ pub struct GlobalArgs {
     pub profile: Option<String>,
     pub api_key: Option<String>,
     pub host: Option<String>,
+    pub workspace: Option<String>,
     pub output: Option<OutputFormat>,
     pub yes: bool,
     pub read_only: bool,
@@ -44,6 +45,7 @@ pub async fn resolve_client(g: &GlobalArgs) -> Result<(ResolvedConfig, NestrClie
         g.profile.as_deref(),
         g.api_key.as_deref(),
         g.host.as_deref(),
+        g.workspace.as_deref(),
         g.output,
     )
     .await?;

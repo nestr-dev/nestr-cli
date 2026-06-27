@@ -173,7 +173,7 @@ fn render_group_names(data: &Value, output: OutputFormat) -> Result<()> {
 
 pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     match cmd {
         UsersCmd::List {
             search,

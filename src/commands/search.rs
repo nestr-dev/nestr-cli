@@ -61,9 +61,15 @@ pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
         extra.push(("cleanText", "true"));
     }
 
+    // A workspace-wide search needs a workspace; a nest-scoped search (--in) does not.
+    let workspace = if args.r#in.is_some() {
+        ""
+    } else {
+        cfg.require_workspace()?
+    };
     let (data, meta) = run_search(
         &client,
-        &cfg.workspace_id,
+        workspace,
         &args.query,
         args.r#in.as_deref(),
         &extra,

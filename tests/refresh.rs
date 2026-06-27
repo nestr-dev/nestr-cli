@@ -88,7 +88,6 @@ fn save_oauth_profile(name: &str, host: &str) {
         host: host.to_string(),
         workspace_id: "ws".into(),
         api_key: None,
-        label: None,
         oauth_client_id: Some("client-1".into()),
         oauth_token_url: None,
         oauth_authorize_url: None,

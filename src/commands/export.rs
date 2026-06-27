@@ -30,7 +30,7 @@ pub async fn fetch_work(client: &NestrClient, ws: &str) -> crate::error::Result<
 
 pub async fn run(cmd: ExportCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     // Export is a JSON dump regardless of -o (the nested tree has no table form).
     let data = match cmd {
         ExportCmd::Governance => fetch_governance(&client, &ws).await?,

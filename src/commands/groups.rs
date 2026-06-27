@@ -65,7 +65,7 @@ fn render_groups(data: &Value, output: OutputFormat) -> Result<()> {
 
 pub async fn run(cmd: GroupsCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
-    let ws = cfg.workspace_id.clone();
+    let ws = cfg.require_workspace()?.to_string();
     match cmd {
         GroupsCmd::List => {
             let data = fetch_list(&client, &ws).await?;

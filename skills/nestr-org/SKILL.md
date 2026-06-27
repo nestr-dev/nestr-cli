@@ -16,6 +16,7 @@ for profiles, global flags, and the full command map.
 ```bash
 nestr workspaces list                    # your workspaces
 nestr workspaces get <id>                # one workspace
+nestr workspaces use <id>                # pin this profile's active workspace
 nestr circles list                       # circles in the active workspace
 nestr circles get <id>                   # one circle (purpose, domains, roles)
 nestr roles list                         # all roles in the workspace

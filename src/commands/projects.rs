@@ -51,7 +51,7 @@ pub async fn run(cmd: ProjectsCmd, g: &GlobalArgs) -> Result<()> {
             if clean_text {
                 params.push(("cleanText", "true"));
             }
-            let (data, meta) = fetch_list(&client, &cfg.workspace_id, &params).await?;
+            let (data, meta) = fetch_list(&client, cfg.require_workspace()?, &params).await?;
             render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
     }
