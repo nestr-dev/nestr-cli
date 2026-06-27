@@ -34,7 +34,7 @@ pub async fn run_logout(profile: Option<String>, yes: bool) -> Result<()> {
     crate::safety::confirm_destructive(&format!("Log out profile '{name}'?"), yes)?;
 
     // Best-effort server-side invalidation.
-    if let Ok(cfg) = config::resolve(Some(&name), None, None, None).await {
+    if let Ok(cfg) = config::resolve(Some(&name), None, None, None, None).await {
         if let Ok(client) = NestrClient::new(cfg.api_base, &cfg.bearer) {
             let _ = client
                 .get::<serde_json::Value>("/users/me/logout", &[])
@@ -62,7 +62,12 @@ pub async fn run_status(profile: Option<String>) -> Result<()> {
     println!("profile:   {name}");
     println!("host:      {}", p.host);
     println!("api_base:  {}", p.api_base());
-    println!("workspace: {}", p.workspace_id);
+    let ws = if p.workspace_id.is_empty() {
+        "(none — full account; set with `nestr workspaces use <id>`)"
+    } else {
+        &p.workspace_id
+    };
+    println!("workspace: {ws}");
     match p.auth {
         AuthKind::ApiKey => println!("auth:      api-key ({:?})", p.credential_storage),
         AuthKind::OAuth => {

@@ -30,10 +30,12 @@ pub async fn run(g: &GlobalArgs) -> Result<()> {
             render::clean_text(name),
             render::clean_text(username)
         );
-        println!(
-            "profile: {}  workspace: {}",
-            cfg.profile_name, cfg.workspace_id
-        );
+        let ws = if cfg.workspace_id.is_empty() {
+            "(none — full account)"
+        } else {
+            &cfg.workspace_id
+        };
+        println!("profile: {}  workspace: {ws}", cfg.profile_name);
     })?;
     Ok(())
 }

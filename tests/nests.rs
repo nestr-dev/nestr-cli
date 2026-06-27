@@ -126,7 +126,6 @@ async fn read_only_blocks_delete_before_writing() {
         host: server.uri(),
         workspace_id: "ws".into(),
         api_key: Some("k".into()),
-        label: None,
         oauth_client_id: None,
         oauth_token_url: None,
         oauth_authorize_url: None,

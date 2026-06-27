@@ -82,6 +82,10 @@ struct Cli {
     )]
     host: Option<String>,
 
+    /// Workspace to act on (overrides the profile's; useful for full-account profiles).
+    #[arg(long, short = 'w', global = true, help_heading = "Global Options")]
+    workspace: Option<String>,
+
     /// Output format: text or json.
     #[arg(long, short = 'o', global = true, help_heading = "Global Options")]
     output: Option<OutputFormat>,
@@ -251,6 +255,7 @@ async fn run() -> anyhow::Result<()> {
         profile: cli.profile.clone(),
         api_key: cli.api_key.clone(),
         host: cli.host.clone(),
+        workspace: cli.workspace.clone(),
         output: cli.output,
         yes: cli.yes,
         read_only: cli.read_only,
@@ -263,7 +268,7 @@ async fn run() -> anyhow::Result<()> {
             AuthCmd::Status { profile } => auth::run_status(profile).await,
         },
         Commands::Profiles { cmd } => match cmd {
-            ProfilesCmd::Add { name } => profiles::run_add(name).await,
+            ProfilesCmd::Add { name } => profiles::run_add(name, cli.host.clone()).await,
             ProfilesCmd::List => profiles::run_list(),
             ProfilesCmd::Use { name } => profiles::run_use(name),
             ProfilesCmd::Remove { name } => profiles::run_remove(name, cli.yes),

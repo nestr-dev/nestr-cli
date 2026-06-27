@@ -328,7 +328,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
         }
         NestsCmd::BulkReorder { ids } => {
             safety::enforce_read_only(g.read_only, "bulk-reorder")?;
-            let data = bulk_reorder(&client, &cfg.workspace_id, &ids).await?;
+            let data = bulk_reorder(&client, cfg.require_workspace()?, &ids).await?;
             render::output_nests(&data, None, cfg.output, false)?;
         }
         NestsCmd::Label { cmd } => {

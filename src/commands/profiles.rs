@@ -1,6 +1,8 @@
 use anyhow::{bail, Result};
 use inquire::{Confirm, Password, PasswordDisplayMode, Select, Text};
 
+use crate::api_client::NestrClient;
+use crate::commands::workspaces;
 use crate::config::{self, AuthKind, CredentialStorage, OutputFormat, Profile};
 use crate::{keyring_store, oauth};
 
@@ -42,7 +44,6 @@ pub fn run_list() -> Result<()> {
         };
         rows.push(vec![
             name,
-            p.label.unwrap_or_else(|| "-".into()),
             p.host,
             p.workspace_id,
             auth.into(),
@@ -51,10 +52,7 @@ pub fn run_list() -> Result<()> {
     }
     println!(
         "{}",
-        crate::render::format_table(
-            &["NAME", "LABEL", "HOST", "WORKSPACE", "AUTH", "DEFAULT"],
-            rows,
-        )
+        crate::render::format_table(&["NAME", "HOST", "WORKSPACE", "AUTH", "DEFAULT"], rows,)
     );
     Ok(())
 }
@@ -84,12 +82,14 @@ pub fn run_remove(name: String, yes: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_add(name: Option<String>) -> Result<()> {
+pub async fn run_add(name: Option<String>, host_override: Option<String>) -> Result<()> {
     let first = config::list_profile_names()?.is_empty();
     let name = match name {
         Some(n) if !n.is_empty() => n,
         _ => {
-            let mut t = Text::new("Profile name:").with_help_message("e.g. prod, staging, local");
+            let mut t = Text::new("Profile name:").with_help_message(
+                "a short name for this workspace/account — e.g. acme, client-x, side-project",
+            );
             if first {
                 t = t.with_default("default");
             }
@@ -97,15 +97,12 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
         }
     };
 
-    let host = Text::new("Nestr host:")
-        .with_default("https://app.nestr.io")
-        .prompt()?
+    // Nestr is hosted, so the host isn't prompted — it defaults to app.nestr.io.
+    // Self-hosted/staging/dev users point at their instance with --host / NESTR_HOST.
+    let host = host_override
+        .unwrap_or_else(|| "https://app.nestr.io".to_string())
         .trim_end_matches('/')
         .to_string();
-    let workspace_id = Text::new("Workspace ID:").prompt()?;
-    let label = Text::new("Label (optional):")
-        .prompt_skippable()?
-        .filter(|s| !s.is_empty());
 
     let use_oauth = Select::new("Authentication method:", AUTH_METHODS.to_vec())
         .prompt()?
@@ -118,10 +115,9 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
             AuthKind::ApiKey
         },
         credential_storage: CredentialStorage::File,
-        host: host.clone(),
-        workspace_id,
+        host,
+        workspace_id: String::new(), // set below from the OAuth scope or a picker
         api_key: None,
-        label,
         oauth_client_id: None,
         oauth_token_url: None,
         oauth_authorize_url: None,
@@ -137,6 +133,17 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
         )
         .await?;
         println!("Login successful.");
+        // The consent screen already chose the scope, so don't ask again. A
+        // single-workspace grant (`nest:{id}`) pins it; a full-account grant leaves
+        // the profile workspace-less — auto-selecting only when the account has
+        // exactly one workspace — and you switch later with `nestr workspaces use`.
+        profile.workspace_id = match nest_scope_workspace(tokens.scope.as_deref()) {
+            Some(id) => id,
+            None => {
+                let client = NestrClient::new(profile.api_base(), &tokens.access_token)?;
+                sole_workspace(&client).await?.unwrap_or_default()
+            }
+        };
         profile.credential_storage = pick_storage()?;
         match profile.credential_storage {
             CredentialStorage::OsStore => {
@@ -152,6 +159,7 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
             .with_display_mode(PasswordDisplayMode::Masked)
             .without_confirmation()
             .prompt()?;
+        profile.workspace_id = Text::new("Workspace ID:").prompt()?;
         profile.credential_storage = pick_storage()?;
         match profile.credential_storage {
             CredentialStorage::OsStore => keyring_store::store_secret(&name, "api_key", &key)?,
@@ -175,4 +183,52 @@ pub async fn run_add(name: Option<String>) -> Result<()> {
         config::config_dir().display()
     );
     Ok(())
+}
+
+/// Parse `nest:{workspaceId}` out of a granted OAuth scope string. The consent
+/// screen sets a `nest:{id}` scope when a single workspace is chosen.
+fn nest_scope_workspace(scope: Option<&str>) -> Option<String> {
+    scope?
+        .split_whitespace()
+        .find_map(|s| s.strip_prefix("nest:").map(str::to_string))
+}
+
+/// Return the account's only workspace id, or `None` if it has zero or many.
+/// A full-account profile starts workspace-less; its active workspace is chosen
+/// later with `nestr workspaces use <id>` (or per command with `--workspace`).
+async fn sole_workspace(client: &NestrClient) -> Result<Option<String>> {
+    let (data, _) = workspaces::fetch_list(client, &[]).await?;
+    let ids: Vec<String> = data
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.get("_id").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    Ok(match ids.len() {
+        1 => Some(ids.into_iter().next().unwrap()),
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nest_scope_workspace_extracts_nest_id() {
+        // Single workspace chosen → token carries user: + nest:{id}.
+        assert_eq!(
+            nest_scope_workspace(Some("user:u1 nest:ws9")),
+            Some("ws9".to_string())
+        );
+        assert_eq!(
+            nest_scope_workspace(Some("nest:abc")),
+            Some("abc".to_string())
+        );
+        // Full account (user-only) or no scope → no single workspace.
+        assert_eq!(nest_scope_workspace(Some("user:u1")), None);
+        assert_eq!(nest_scope_workspace(Some("")), None);
+        assert_eq!(nest_scope_workspace(None), None);
+    }
 }

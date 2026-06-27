@@ -122,11 +122,11 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
             if let Some(s) = &search {
                 params.push(("search", s));
             }
-            let data = fetch_workspace(&client, &cfg.workspace_id, &params).await?;
+            let data = fetch_workspace(&client, cfg.require_workspace()?, &params).await?;
             render_labels(&data, cfg.output)?;
         }
         LabelsCmd::Get { label_id } => {
-            let data = fetch_workspace_one(&client, &cfg.workspace_id, &label_id).await?;
+            let data = fetch_workspace_one(&client, cfg.require_workspace()?, &label_id).await?;
             match cfg.output {
                 crate::config::OutputFormat::Json => print_json(&data)?,
                 crate::config::OutputFormat::Text => {

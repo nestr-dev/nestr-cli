@@ -26,6 +26,7 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 
 - `-p, --profile <name>` — pick a profile for this invocation.
 - `--api-key <key>` / `--host <url>` — override the profile's credential / host.
+- `-w, --workspace <id>` — act on a specific workspace, overriding the profile's (for full-account profiles).
 - `-o, --output text|json` — `text` (tables) or `json` (raw, for `jq`).
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).
 - `--read-only` — hard-block every write (also `NESTR_READ_ONLY=1`).
