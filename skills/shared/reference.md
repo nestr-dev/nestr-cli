@@ -31,6 +31,33 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).
 - `--read-only` — hard-block every write (also `NESTR_READ_ONLY=1`).
 
+## Workspace context
+
+A profile pins **one active workspace**. Some commands act on that workspace; the rest
+work by nest id or are account-/user-level and ignore it.
+
+```bash
+nestr workspaces list                    # the workspaces this identity can reach
+nestr workspaces use <id>                # persist a different active workspace on the profile
+```
+
+For a single command, override with `-w, --workspace <id>` instead of switching. A
+workspace-scoped command with no active workspace errors with guidance to run
+`nestr workspaces use <id>` or pass `-w`.
+
+- **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
+  `roles`, `users`, `groups`, `labels list`/`labels get`, `insights`, `export`,
+  `webhooks`, `workspaces apps`, `nests bulk-reorder`.
+- **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
+  `comments`, `inbox`, `plan`, `notifications`, `tensions`, `links`, `me`, `auth`,
+  `profiles`, `workspaces list`/`get`/`use`/`create`.
+
+**Search is workspace-scoped.** Results only come from the active workspace (or the
+`--in <nestId>` subtree) — there is no cross-workspace search endpoint. If a search
+returns nothing, the nest may simply live in **another** workspace: list them with
+`nestr workspaces list`, then **ask the user** before switching
+(`nestr workspaces use <id>`, or a one-off `-w <id>`) and searching again.
+
 ## The model
 
 Everything in Nestr is a **Nest**. What a nest *is* is set by exactly **one prime

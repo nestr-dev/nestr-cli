@@ -15,11 +15,23 @@ Full setup, global flags, and the command map:
 ## Find things
 
 ```bash
-nestr search "quarterly review"          # search the whole workspace
+nestr search "quarterly review"          # search the active workspace
 nestr search "bug" --in <nestId>         # search within a nest subtree
 nestr nests get <id>                     # read one nest (or several: id1,id2)
 nestr nests children <id>                # list a nest's children
 ```
+
+`search` is **workspace-scoped** — it only looks in the active workspace (or the
+`--in` subtree); there is no cross-workspace search. So if a search comes back empty,
+don't conclude the nest doesn't exist — it may live in a **different** workspace. List
+the reachable ones and offer to look there, but **ask the user before switching**:
+
+```bash
+nestr workspaces list                    # see which workspaces this identity can reach
+nestr workspaces use <id>                # switch the active workspace, then search again
+```
+
+(Or scope a single search to another workspace with the global `-w <id>` flag.)
 
 ## Capture & plan
 
