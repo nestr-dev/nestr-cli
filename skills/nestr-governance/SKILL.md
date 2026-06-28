@@ -7,8 +7,15 @@ description: Use when proposing or processing organizational change in Nestr via
 
 A **tension** is the gap between current reality and a desired state. In Nestr you
 process tensions through governance: propose a change, the circle consents, it enacts.
-See [`../shared/reference.md`](../shared/reference.md) for profiles, global flags,
-and the full command map.
+
+First run `nestr profiles add` (OAuth or API key) — a profile pairs a **workspace**
+with an **identity**. Global flags on every command: `-p/--profile`, `-o text|json`,
+`--read-only` (block writes), and `--yes` (skip write confirmations; required for
+agents). Full setup, env overrides, and the command map:
+[shared/reference.md](https://github.com/nestr-dev/nestr-cli/blob/main/skills/shared/reference.md).
+
+Find ids: `nestr circles list` for a circle, `nestr tensions list <circleId>` for its
+tensions, and `nestr tensions mine` for the ones you created or are assigned to.
 
 ## Anatomy of a tension
 
@@ -41,6 +48,9 @@ nestr tensions parts propose-update <circleId> <tensionId> --id <roleId> --purpo
 # Propose REMOVING an existing item
 nestr tensions parts propose-delete <circleId> <tensionId> --id <roleId>
 
+# Edit a part you added (before submitting)
+nestr tensions parts modify <circleId> <tensionId> <partId> --title "Renamed steward"
+
 # Manage a proposal's accountabilities/domains
 nestr tensions parts children add <circleId> <tensionId> <partId> --title "X" --label accountability
 ```
@@ -58,6 +68,7 @@ nestr tensions parts changes <circleId> <tensionId> <partId>   # variable: old �
 nestr tensions submit <circleId> <tensionId>     # draft → proposed (notifies the circle)
 nestr tensions status <circleId> <tensionId>     # watch the vote tally
 nestr tensions retract <circleId> <tensionId>    # pull it back to draft to edit
+nestr tensions update <circleId> <tensionId> --description "Updated facts"   # edit a drafted tension
 ```
 
 When a tension is **awaiting your consent**, you vote:

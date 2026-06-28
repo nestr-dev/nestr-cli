@@ -28,20 +28,7 @@ pub struct CompactNest {
 impl CompactNest {
     /// Best-effort join of label identifiers: handles `["code"]` and `[{code|title|_id}]`.
     pub fn labels_str(&self) -> String {
-        self.labels
-            .iter()
-            .filter_map(|l| match l {
-                Value::String(s) => Some(s.clone()),
-                Value::Object(_) => l
-                    .get("code")
-                    .or_else(|| l.get("title"))
-                    .or_else(|| l.get("_id"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(",")
+        label_codes(&self.labels).join(",")
     }
 }
 
@@ -201,8 +188,9 @@ pub struct AppView {
     pub enabled: bool,
 }
 
-/// Join label identifiers for display (handles `["code"]` and `[{code|title|_id}]`).
-pub fn join_labels(labels: &[Value]) -> String {
+/// Extract label identifiers (handles `["code"]` and `[{code|title|_id}]`), skipping
+/// anything that yields no string. The single source of truth for reading a nest's labels.
+pub fn label_codes(labels: &[Value]) -> Vec<String> {
     labels
         .iter()
         .filter_map(|l| match l {
@@ -215,8 +203,12 @@ pub fn join_labels(labels: &[Value]) -> String {
                 .map(str::to_string),
             _ => None,
         })
-        .collect::<Vec<_>>()
-        .join(",")
+        .collect()
+}
+
+/// Join label identifiers for display (handles `["code"]` and `[{code|title|_id}]`).
+pub fn join_labels(labels: &[Value]) -> String {
+    label_codes(labels).join(",")
 }
 
 /// A tension: a Nest with a computed `status`.
