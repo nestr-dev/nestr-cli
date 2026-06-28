@@ -239,10 +239,19 @@ fn sanitize(s: &str) -> String {
         .collect()
 }
 
-/// The uniform cleaner for every API string shown in text mode: strip terminal
-/// control sequences, then strip HTML tags and collapse whitespace.
+/// The uniform cleaner for every API string shown in text mode. Mirrors the web
+/// app's `html2plaintext`: strip the HTML tags, then decode the full HTML5 entity
+/// set (`&nbsp;`, `&amp;`, `&#8217;`, …) via `htmlize`. Kept single-line — table
+/// cells can't hold the `<p>`/`<br>` breaks `html2plaintext` emits, so they collapse
+/// to spaces — and re-sanitized *after* decoding so an entity-encoded control char
+/// (e.g. `&#27;`) can't smuggle a terminal escape back in.
 pub fn clean_text(s: &str) -> String {
-    strip_html(&sanitize(s))
+    let stripped = strip_html(&sanitize(s));
+    let decoded = htmlize::unescape(stripped.as_str());
+    sanitize(&decoded)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Strip HTML tags and collapse whitespace from rich-text titles for terminal display.
@@ -957,6 +966,39 @@ mod tests {
         assert!(!v.contains('\u{1b}') && !v.contains('\u{07}'));
         assert!(!v.contains('<') && !v.contains('>'));
         assert!(v.contains("title"));
+    }
+
+    #[test]
+    fn clean_text_decodes_full_html_entities() {
+        // The actual reported bug: BSVA titles showed `&nbsp;`.
+        assert_eq!(clean_text("BSV&nbsp;Association"), "BSV Association");
+        // Named entities beyond the basic five (html-escape couldn't do these).
+        assert_eq!(clean_text("R&amp;D &mdash; done"), "R&D — done");
+        assert_eq!(clean_text("it&#39;s &ldquo;quoted&rdquo;"), "it's “quoted”");
+        // Tags stripped first, then entity decoded (so `&lt;` stays literal text).
+        assert_eq!(clean_text("<b>a&amp;b</b>"), "a&b");
+        assert_eq!(clean_text("3 &lt; 5"), "3 < 5");
+    }
+
+    #[test]
+    fn clean_text_sanitizes_entity_encoded_control_chars() {
+        // Decoding HTML entities can resurrect terminal control chars, so clean_text
+        // re-sanitizes AFTER the decode. Cover every way an ESC/BEL/NUL can be smuggled
+        // in as an entity — SEC-1 (terminal-escape injection) must stay closed.
+        for payload in [
+            "x&#27;[31mred",      // decimal ESC + CSI colour
+            "x&#x1b;[31mred",     // hex ESC
+            "bell&#7;here",       // decimal BEL
+            "bell&#x07;here",     // hex BEL
+            "nul&#0;here",        // NUL
+            "t&#27;]0;pwned&#7;", // OSC window-title injection, both delimiters as entities
+        ] {
+            let v = clean_text(payload);
+            assert!(
+                !v.contains('\u{1b}') && !v.contains('\u{07}') && !v.contains('\u{0}'),
+                "control char leaked for {payload:?}: {v:?}"
+            );
+        }
     }
 
     #[test]
