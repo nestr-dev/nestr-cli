@@ -14,6 +14,14 @@ curl -fsSL https://raw.githubusercontent.com/nestr-dev/nestr-cli/main/install.sh
 
 Downloads the latest release for your platform, verifies its SHA-256 checksum (and, if `cosign` is installed, its keyless signature), and installs `nestr` to `/usr/local/bin` (falling back to `~/.local/bin`). Override with `NESTR_VERSION=0.1.0` (the bare version, no `v` prefix) or `NESTR_INSTALL_DIR=/path/to/bin`.
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew install nestr-dev/tap/nestr-cli
+```
+
+Installs the prebuilt, cosign-signed release binary (the installed command is `nestr`). Upgrade with `brew upgrade nestr-cli`.
+
 ### Agent skills (Claude Code, Cursor, Copilot, …)
 
 Teach your coding agent the Nestr workflows — install the bundled [skills](skills/) with one command:
