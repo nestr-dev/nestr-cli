@@ -93,7 +93,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../nestr-${RELEASE_TAG#v}-${{ matrix.target }}.tar.gz nestr
+          tar czf "../../../nestr-${RELEASE_TAG#v}-${{ matrix.target }}.tar.gz" nestr
           cd ../../..
 
       - name: Package (windows)
@@ -159,3 +159,59 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           files: artifacts/*
+
+  # Regenerate the Homebrew formula in nestr-dev/homebrew-tap from the published
+  # checksums and push it. No-op (with a warning) until the HOMEBREW_TAP_TOKEN secret
+  # — a PAT with contents:write on the tap repo — is configured.
+  homebrew:
+    name: Update Homebrew tap
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Render formula and push to the tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew tap update."
+            exit 0
+          fi
+          version="${TAG#v}"
+          base="https://github.com/nestr-dev/nestr-cli/releases/download/${TAG}"
+          curl -fsSL "${base}/checksums-sha256.txt" -o checksums.txt
+          sha() { awk -v f="nestr-${version}-$1" '$2 == f { print $1 }' checksums.txt; }
+          mac_arm="$(sha aarch64-apple-darwin.tar.gz)"
+          mac_x86="$(sha x86_64-apple-darwin.tar.gz)"
+          lnx_arm="$(sha aarch64-unknown-linux-musl.tar.gz)"
+          lnx_x86="$(sha x86_64-unknown-linux-musl.tar.gz)"
+          for v in "${mac_arm}" "${mac_x86}" "${lnx_arm}" "${lnx_x86}"; do
+            if [ -z "${v}" ]; then
+              echo "::error::missing checksum in checksums-sha256.txt"
+              exit 1
+            fi
+          done
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/nestr-dev/homebrew-tap.git" tap
+          sed -e "s/@@VERSION@@/${version}/g" \
+              -e "s/@@MAC_ARM@@/${mac_arm}/g" \
+              -e "s/@@MAC_X86@@/${mac_x86}/g" \
+              -e "s/@@LNX_ARM@@/${lnx_arm}/g" \
+              -e "s/@@LNX_X86@@/${lnx_x86}/g" \
+              .github/homebrew/nestr-cli.rb.tmpl > tap/Formula/nestr-cli.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/nestr-cli.rb
+          if git diff --cached --quiet; then
+            echo "Formula already current — nothing to push."
+          else
+            git commit -m "nestr-cli ${version}"
+            git push
+          fi
