@@ -205,9 +205,17 @@ fn send_http_response(mut stream: &TcpStream, status: u16, body: &str) {
 }
 
 async fn post_token_form(token_url: &str, form: &[(&str, &str)]) -> Result<TokenResponse> {
+    // The token exchange / refresh POSTs the auth code or refresh token and receives
+    // fresh tokens; refuse to do so over cleartext http to a non-loopback host
+    // (SEC: non-https url). This covers both browser_login and refresh().
+    crate::validation::require_secure_credential_url(token_url).map_err(anyhow::Error::msg)?;
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))
+        // Don't follow redirects: a redirect from the (validated) token endpoint could
+        // otherwise re-POST the auth code / refresh token to another host past the guard
+        // above. Matches NestrClient's policy.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("building token client")?;
     let resp = client
@@ -232,6 +240,9 @@ pub async fn browser_login(
     token_url: &str,
     client_id: &str,
 ) -> Result<TokenResponse> {
+    // The browser is sent to authorize_url carrying the PKCE challenge + state, and the
+    // code comes back the same way; refuse a non-loopback cleartext http login leg.
+    crate::validation::require_secure_credential_url(authorize_url).map_err(anyhow::Error::msg)?;
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
     let (listener, port) = bind_callback_listener()?;

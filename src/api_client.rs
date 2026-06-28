@@ -84,6 +84,13 @@ impl NestrClient {
         bearer: &str,
         refresh: Option<ReactiveRefresh>,
     ) -> Result<Self> {
+        // Refuse to build a client that would send the bearer token over a
+        // non-confidential channel. This single construction chokepoint covers every
+        // request `send` makes (SEC: cleartext transmission). Loopback http stays
+        // allowed for local dev.
+        let api_base = api_base.into();
+        crate::validation::require_secure_credential_url(&api_base)
+            .map_err(NestrError::Validation)?;
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
@@ -103,7 +110,7 @@ impl NestrClient {
             .build()?;
         Ok(Self {
             inner,
-            api_base: api_base.into(),
+            api_base,
             auth: Arc::new(RwLock::new(bearer.to_string())),
             refresh,
         })
