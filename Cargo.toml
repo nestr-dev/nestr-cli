@@ -1,6 +1,6 @@
 [package]
 name = "nestr-cli"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Nestr CLI — fast, composable access to Nestr for terminals and agents."
 repository = "https://github.com/nestr-dev/nestr-cli"
