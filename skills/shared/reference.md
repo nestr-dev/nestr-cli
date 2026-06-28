@@ -47,7 +47,7 @@ workspace-scoped command with no active workspace errors with guidance to run
 
 - **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
   `roles`, `users`, `groups`, `labels list`/`labels get`, `insights`, `export`,
-  `webhooks`, `workspaces apps`, `nests reorder`.
+  `webhooks`, `workspaces apps`, `nests bulk-reorder`.
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
   `comments`, `inbox`, `plan`, `notifications`, `tensions`, `links`, `me`, `auth`,
   `profiles`, `workspaces list`/`get`/`use`/`create`.
