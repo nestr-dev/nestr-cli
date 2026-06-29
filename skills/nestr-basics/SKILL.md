@@ -50,14 +50,17 @@ What a nest **is** is set by one **prime label** (`project`, `goal`, `result`,
 create --label <prime>` makes each kind, and `--parent` nests it as a subtask.
 
 ```bash
-nestr nests create --title "Fix the login bug" --parent <projectId>      # a plain todo (no prime label)
+nestr nests create --title "Fix the login bug" --parent <projectId> --assignee me   # a plain todo, assigned to you
 nestr nests create --title "Write the spec" --parent <id> --label project \
-  --description "Scope, milestones, open questions" --due 2026-07-01      # a project
+  --description "Scope, milestones, open questions" --due 2026-07-01 --assignee me   # a project
 nestr nests create --title "Pre-launch checklist" --parent <projectId> --label checklist
 ```
 
 - `--label project` (or any prime) is what makes it that kind — **omit it and you get a
   plain todo, not a project.** A nest can carry only one prime label.
+- `--assignee` sets who does the work (the nest's `users`). **A project or task created
+  with no `--assignee` is unassigned — it shows under nobody's work.** Pass `me` for
+  yourself, or a user id from `nestr users list` (repeatable for several people).
 - `--purpose` is an optional one-line *why* (a project inherits its parent's if unset);
   `--description` is the body. Never put body text in `--purpose`.
 - `--parent <id>` makes the new nest a child/subtask — this is how you build the tree.
@@ -65,12 +68,14 @@ nestr nests create --title "Pre-launch checklist" --parent <projectId> --label c
 ```bash
 nestr nests update <id> --completed true                # tick it off
 nestr nests update <id> --due 2026-07-01                # edit a field
+nestr nests update <id> --assignee <userId>             # (re)assign — `me` for yourself
 nestr nests label add <id> <labelId>                    # add one label (ids/codes via `nestr labels list`)
 nestr nests label remove <id> <labelId>                 # remove one label
 ```
 
 `nests update --label …` **replaces** the whole label set (re-list any you want to keep);
-`nests label add/remove` toggle a single label without touching the rest.
+`nests label add/remove` toggle a single label without touching the rest. `--assignee`
+likewise replaces the whole assigned set.
 
 ## Discuss & post updates
 

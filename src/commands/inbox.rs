@@ -111,12 +111,12 @@ pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("cleanText", "true"));
             }
             let data = fetch_get(&client, &id, &params).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         InboxCmd::Create { title, description } => {
             safety::enforce_read_only(g.read_only, "inbox create")?;
             let data = create_item(&client, &title, description.as_deref()).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         InboxCmd::Update {
             id,
@@ -136,7 +136,7 @@ pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
                 map.insert("completed".into(), c.into());
             }
             let data = update_item(&client, &id, &Value::Object(map)).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         InboxCmd::Reorder { ids } => {
             safety::enforce_read_only(g.read_only, "inbox reorder")?;

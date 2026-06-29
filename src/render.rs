@@ -101,8 +101,25 @@ pub fn output_nests(
     Ok(())
 }
 
-/// Render a single Nest-shaped object as a detail block (or raw JSON).
-pub fn output_nest_detail(data: &Value, output: OutputFormat) -> Result<()> {
+/// The canonical web permalink for a nest: `{host}/n/{id}`, or
+/// `{host}/n/{parentId}/{id}` when a parent context is known (opens the nest in
+/// context). The path segment is `/n/` — never `/nest/`, `/nests/`, or a `#/`
+/// hash route. Returns `None` for an empty id so callers can skip the line.
+pub fn nest_url(host: &str, parent_id: Option<&str>, id: &str) -> Option<String> {
+    if id.is_empty() {
+        return None;
+    }
+    let base = host.trim_end_matches('/');
+    Some(match parent_id.filter(|p| !p.is_empty()) {
+        Some(parent) => format!("{base}/n/{parent}/{id}"),
+        None => format!("{base}/n/{id}"),
+    })
+}
+
+/// Render a single Nest-shaped object as a detail block (or raw JSON). `host` is the
+/// active profile's host, used to print the nest's canonical web permalink in text
+/// mode so callers never have to guess the URL.
+pub fn output_nest_detail(data: &Value, host: &str, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
@@ -119,6 +136,9 @@ pub fn output_nest_detail(data: &Value, output: OutputFormat) -> Result<()> {
             }
             if let Some(c) = n.completed {
                 println!("completed: {c}");
+            }
+            if let Some(url) = nest_url(host, n.parent_id.as_deref(), &n.id) {
+                println!("url: {url}");
             }
             if let Some(h) = hint_line(data) {
                 println!("{h}");
@@ -748,6 +768,32 @@ pub fn webhook_detail(data: &Value, output: OutputFormat) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn nest_url_builds_canonical_n_path() {
+        // Canonical permalink is HOST/n/{id} — path is `/n/`, never `/nest/` or `/#/nest`.
+        assert_eq!(
+            nest_url("https://app.nestr.io", None, "abc"),
+            Some("https://app.nestr.io/n/abc".to_string())
+        );
+        // A trailing slash on the host must not double up.
+        assert_eq!(
+            nest_url("https://app.nestr.io/", None, "abc"),
+            Some("https://app.nestr.io/n/abc".to_string())
+        );
+        // A known parent context yields HOST/n/{parentId}/{id} (opens in context).
+        assert_eq!(
+            nest_url("https://app.nestr.io", Some("p1"), "abc"),
+            Some("https://app.nestr.io/n/p1/abc".to_string())
+        );
+        // An empty parent is ignored, not interpolated as `/n//abc`.
+        assert_eq!(
+            nest_url("https://app.nestr.io", Some(""), "abc"),
+            Some("https://app.nestr.io/n/abc".to_string())
+        );
+        // No id → no link.
+        assert_eq!(nest_url("https://app.nestr.io", None, ""), None);
+    }
 
     #[test]
     fn json_is_pretty_array() {

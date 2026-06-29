@@ -58,6 +58,11 @@ pub enum NestsCmd {
         /// Due date, ISO format (e.g. 2026-07-01).
         #[arg(long)]
         due: Option<String>,
+        /// Assign user(s) to the nest by id (repeatable). Sets the nest's `users`.
+        /// Pass the literal `me` to assign yourself. A project/task with no assignee
+        /// shows up under nobody's work — assign whoever does the work.
+        #[arg(long = "assignee")]
+        assignees: Vec<String>,
     },
     /// Update fields on a nest.
     Update {
@@ -85,6 +90,10 @@ pub enum NestsCmd {
         /// without touching the rest, use `nests label add/remove`.
         #[arg(long = "label")]
         labels: Vec<String>,
+        /// Replace the assigned user(s) by id (repeatable) — sends the full set, so re-list
+        /// anyone you want to keep. Pass the literal `me` for yourself.
+        #[arg(long = "assignee")]
+        assignees: Vec<String>,
     },
     /// Delete a nest (soft delete).
     Delete { id: String },
@@ -134,6 +143,110 @@ pub async fn fetch_children(
     let raw: Value = client.get(&format!("/nests/{id}/children"), params).await?;
     let (data, meta, _) = unwrap_data(raw);
     Ok((data, meta))
+}
+
+/// Resolve `--assignee` tokens into the `users` array Nestr stores on a nest. Ids
+/// pass through unchanged; the literal `me` is expanded to the authenticated user's
+/// id via a single `/users/me` lookup (performed only when `me` is present, so the
+/// common explicit-id case stays network-free).
+pub async fn resolve_assignees(
+    client: &NestrClient,
+    assignees: &[String],
+) -> crate::error::Result<Vec<String>> {
+    if !assignees.iter().any(|a| a == "me") {
+        return Ok(assignees.to_vec());
+    }
+    let me = crate::commands::me::fetch_me(client).await?;
+    let my_id = me
+        .get("_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if my_id.is_empty() {
+        return Err(crate::error::NestrError::Validation(
+            "could not resolve `--assignee me`: /users/me returned no id".into(),
+        ));
+    }
+    Ok(assignees
+        .iter()
+        .map(|a| if a == "me" { my_id.clone() } else { a.clone() })
+        .collect())
+}
+
+/// Assemble the `POST /nests` body. Pure so the field mapping — including the
+/// `users` assignment that an unassigned project would otherwise miss — is unit
+/// testable without a client. Optional fields are omitted (not sent as null/empty).
+pub fn create_body(
+    title: String,
+    parent: Option<String>,
+    purpose: Option<String>,
+    description: Option<String>,
+    labels: &[String],
+    due: Option<String>,
+    users: &[String],
+) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("title".into(), title.into());
+    if let Some(p) = parent {
+        body.insert("parentId".into(), p.into());
+    }
+    if let Some(p) = purpose {
+        body.insert("purpose".into(), p.into());
+    }
+    if let Some(d) = description {
+        body.insert("description".into(), d.into());
+    }
+    if !labels.is_empty() {
+        body.insert("labels".into(), Value::from(labels.to_vec()));
+    }
+    if let Some(d) = due {
+        body.insert("due".into(), d.into());
+    }
+    if !users.is_empty() {
+        body.insert("users".into(), Value::from(users.to_vec()));
+    }
+    Value::Object(body)
+}
+
+/// Assemble the `PATCH /nests/{id}` body. Only fields the caller actually passed are
+/// sent; `labels` and `users` are full-set replacements (re-list anything to keep).
+#[allow(clippy::too_many_arguments)]
+pub fn update_body(
+    title: Option<String>,
+    purpose: Option<String>,
+    description: Option<String>,
+    due: Option<String>,
+    completed: Option<bool>,
+    parent: Option<String>,
+    labels: &[String],
+    users: &[String],
+) -> Value {
+    let mut body = serde_json::Map::new();
+    if let Some(t) = title {
+        body.insert("title".into(), t.into());
+    }
+    if let Some(p) = purpose {
+        body.insert("purpose".into(), p.into());
+    }
+    if let Some(d) = description {
+        body.insert("description".into(), d.into());
+    }
+    if let Some(d) = due {
+        body.insert("due".into(), d.into());
+    }
+    if let Some(c) = completed {
+        body.insert("completed".into(), c.into());
+    }
+    if let Some(p) = parent {
+        body.insert("parentId".into(), p.into());
+    }
+    if !labels.is_empty() {
+        body.insert("labels".into(), Value::from(labels.to_vec()));
+    }
+    if !users.is_empty() {
+        body.insert("users".into(), Value::from(users.to_vec()));
+    }
+    Value::Object(body)
 }
 
 pub async fn create_nest(client: &NestrClient, body: &Value) -> crate::error::Result<Value> {
@@ -244,7 +357,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             if data.is_array() {
                 render::output_nests(&data, None, cfg.output, false)?;
             } else {
-                render::output_nest_detail(&data, cfg.output)?;
+                render::output_nest_detail(&data, &cfg.host, cfg.output)?;
             }
         }
         NestsCmd::Children {
@@ -279,28 +392,14 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             description,
             labels,
             due,
+            assignees,
         } => {
             safety::enforce_read_only(g.read_only, "nests create")?;
             validation::validate_prime_labels(&labels)?;
-            let mut body = serde_json::Map::new();
-            body.insert("title".into(), title.into());
-            if let Some(p) = parent {
-                body.insert("parentId".into(), p.into());
-            }
-            if let Some(p) = purpose {
-                body.insert("purpose".into(), p.into());
-            }
-            if let Some(d) = description {
-                body.insert("description".into(), d.into());
-            }
-            if !labels.is_empty() {
-                body.insert("labels".into(), serde_json::to_value(&labels)?);
-            }
-            if let Some(d) = due {
-                body.insert("due".into(), d.into());
-            }
-            let data = create_nest(&client, &Value::Object(body)).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            let users = resolve_assignees(&client, &assignees).await?;
+            let body = create_body(title, parent, purpose, description, &labels, due, &users);
+            let data = create_nest(&client, &body).await?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         NestsCmd::Update {
             id,
@@ -311,35 +410,25 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             completed,
             parent,
             labels,
+            assignees,
         } => {
             safety::enforce_read_only(g.read_only, "nests update")?;
             if !labels.is_empty() {
                 validation::validate_prime_labels(&labels)?;
             }
-            let mut body = serde_json::Map::new();
-            if let Some(t) = title {
-                body.insert("title".into(), t.into());
-            }
-            if let Some(p) = purpose {
-                body.insert("purpose".into(), p.into());
-            }
-            if let Some(d) = description {
-                body.insert("description".into(), d.into());
-            }
-            if let Some(d) = due {
-                body.insert("due".into(), d.into());
-            }
-            if let Some(c) = completed {
-                body.insert("completed".into(), c.into());
-            }
-            if let Some(p) = parent {
-                body.insert("parentId".into(), p.into());
-            }
-            if !labels.is_empty() {
-                body.insert("labels".into(), serde_json::to_value(&labels)?);
-            }
-            let data = update_nest(&client, &id, &Value::Object(body)).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            let users = resolve_assignees(&client, &assignees).await?;
+            let body = update_body(
+                title,
+                purpose,
+                description,
+                due,
+                completed,
+                parent,
+                &labels,
+                &users,
+            );
+            let data = update_nest(&client, &id, &body).await?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         NestsCmd::Delete { id } => {
             safety::enforce_read_only(g.read_only, "nests delete")?;
@@ -358,7 +447,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
         } => {
             safety::enforce_read_only(g.read_only, "nests reorder")?;
             let data = reorder_nest(&client, &id, &position, &related_id).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         NestsCmd::BulkReorder { ids } => {
             safety::enforce_read_only(g.read_only, "bulk-reorder")?;
@@ -376,7 +465,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                     set_label(&client, &id, &label_id, false).await?
                 }
             };
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
     }
     Ok(())

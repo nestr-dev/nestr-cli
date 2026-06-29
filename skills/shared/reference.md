@@ -106,6 +106,29 @@ Two distinct fields on nests, circles, roles, and tension parts:
 
 Never put body text in `--purpose` — that is the classic Nestr mistake.
 
+## Assignment
+
+A nest's **assigned people** live in its `users` array (a list of user ids). For a
+**project or task** this is who does the work; for a **role** it is who fills
+(energizes) the role. A project created with no assignee shows up under nobody's work —
+so assign it.
+
+```bash
+nestr nests create --title "Grow the disk" --parent <id> --label project --assignee me
+nestr nests update <id> --assignee <userId>          # reassign (replaces the whole set)
+```
+
+- `--assignee` is repeatable and takes a **user id** (find ids with `nestr users list`),
+  or the literal `me` for the authenticated user (resolved via `nestr me`).
+- On `nests update` it **replaces** the assigned set — re-list anyone you want to keep.
+
+## Linking to a nest
+
+The canonical web permalink for a nest is **`{host}/n/{nestId}`** — the path segment is
+`/n/`, never `/nest/`, `/nests/`, or a `#/` hash route. With a known parent it is
+`{host}/n/{parentId}/{nestId}` (opens the nest in context). `nests get`/`create`/`update`
+print this as a `url:` line in `-o text`; don't hand-build links from memory.
+
 ## Command map
 
 | Group | What it does | Skill |

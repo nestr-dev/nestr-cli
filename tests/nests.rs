@@ -67,6 +67,96 @@ async fn create_posts_body_and_returns_nest() {
 }
 
 #[tokio::test]
+async fn resolve_assignees_passes_plain_ids_through_without_calling_me() {
+    // No `me` token → the helper must not touch /users/me; ids pass straight through.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let out = nests::resolve_assignees(&client, &["u1".into(), "u2".into()])
+        .await
+        .unwrap();
+    assert_eq!(out, vec!["u1".to_string(), "u2".to_string()]);
+}
+
+#[tokio::test]
+async fn resolve_assignees_expands_me_to_current_user_id() {
+    // A `me` token is replaced by the authenticated user's id; other ids are kept.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"meId","username":"a@b.c"}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let out = nests::resolve_assignees(&client, &["u1".into(), "me".into()])
+        .await
+        .unwrap();
+    assert_eq!(out, vec!["u1".to_string(), "meId".to_string()]);
+}
+
+#[test]
+fn create_body_maps_fields_and_assigns_users() {
+    let body = nests::create_body(
+        "bsv-eu-dr-01".into(),
+        Some("role1".into()),
+        None,
+        Some("details".into()),
+        &["project".into()],
+        Some("2026-07-01".into()),
+        &["meId".into()],
+    );
+    assert_eq!(body["title"], "bsv-eu-dr-01");
+    assert_eq!(body["parentId"], "role1");
+    assert_eq!(body["description"], "details");
+    assert_eq!(body["labels"], serde_json::json!(["project"]));
+    assert_eq!(body["due"], "2026-07-01");
+    // The whole point: an assigned project carries its user in `users`.
+    assert_eq!(body["users"], serde_json::json!(["meId"]));
+    // Purpose was None → not sent.
+    assert!(body.get("purpose").is_none());
+}
+
+#[test]
+fn create_body_omits_users_and_optionals_when_absent() {
+    let body = nests::create_body("Loose todo".into(), None, None, None, &[], None, &[]);
+    assert_eq!(body["title"], "Loose todo");
+    // No assignee → no `users` key at all (don't send an empty array).
+    assert!(body.get("users").is_none());
+    assert!(body.get("parentId").is_none());
+    assert!(body.get("labels").is_none());
+}
+
+#[test]
+fn update_body_sets_users_only_when_given() {
+    let body = nests::update_body(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        &["u1".into(), "u2".into()],
+    );
+    assert_eq!(body["users"], serde_json::json!(["u1", "u2"]));
+    assert_eq!(
+        body.as_object().unwrap().len(),
+        1,
+        "only `users` should be set"
+    );
+
+    let empty = nests::update_body(None, None, None, None, None, None, &[], &[]);
+    assert!(empty.as_object().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn bulk_reorder_sends_bare_array_body() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
