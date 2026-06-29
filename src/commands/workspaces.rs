@@ -167,7 +167,7 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
         }
         WorkspacesCmd::Get { id } => {
             let data = fetch_get(&client, &id).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         WorkspacesCmd::Create {
             title,
@@ -200,7 +200,7 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
                 body.insert("configuration".into(), Value::Object(config));
             }
             let data = create_ws(&client, &Value::Object(body)).await?;
-            render::output_nest_detail(&data, cfg.output)?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
         WorkspacesCmd::Apps { cmd } => match cmd {
             None => {
