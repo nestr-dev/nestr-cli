@@ -106,6 +106,17 @@ Two distinct fields on nests, circles, roles, and tension parts:
 
 Never put body text in `--purpose` — that is the classic Nestr mistake.
 
+## Formatting
+
+Text bodies — comment bodies, `--description`, and `--purpose` — render as **Markdown**
+in the web app (headings, `**bold**`, `-`/`1.` lists, `> quotes`, `` `code` ``/fenced
+blocks, `[links](url)`; bare URLs auto-link). Prefer Markdown over one flat line.
+
+**Literal angle brackets are stripped.** The server HTML-sanitizes the body *before*
+storing it, so tag-looking tokens — `<id>`, `Vec<String>`, `x < y` — lose the `<…>`.
+Backticks don't protect them (the sanitizer runs before Markdown). Write `&lt;id&gt;`,
+or rephrase (`{id}`, "x less than y").
+
 ## Assignment
 
 A nest's **assigned people** live in its `users` array (a list of user ids). For a

@@ -84,8 +84,22 @@ Record progress as **comments** on the project or todo — don't rewrite the nes
 
 ```bash
 nestr comments add <nestId> "Spec signed off; implementation starts Monday"   # post an update
+nestr comments add <nestId> "## Status
+- API **done**, deploying Friday
+- blocked on auth review — see [the PR](https://example.com/pr/1)"            # markdown renders
 nestr comments list <nestId>                                                  # read the thread
 ```
+
+Comment bodies (and `--description` / `--purpose`) render as **Markdown** in the web app
+— headings, `**bold**`, `-`/`1.` lists, `> quotes`, `` `code` `` / fenced blocks, and
+`[links](url)` all work (bare URLs auto-link). Write multi-point updates in Markdown
+rather than one flat line.
+
+**Pitfall — literal angle brackets are stripped.** The server runs the body through an
+HTML sanitizer *before* storing it, so anything that looks like a tag — `<id>`,
+`Vec<String>`, `x < y` — loses the `<…>` part. Backticks do **not** protect it (the
+sanitizer runs before Markdown). Write `&lt;id&gt;` for a literal `<id>`, or rephrase
+(`{id}`, "x less than y").
 
 ## Stay current
 
