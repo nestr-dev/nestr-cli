@@ -47,7 +47,9 @@ pub enum NestsCmd {
         /// the body goes in --description, never here.
         #[arg(long)]
         purpose: Option<String>,
-        /// The body: the actual details/content of the nest.
+        /// The body: the actual details/content of the nest. Renders as Markdown in the
+        /// web app; literal angle brackets (`<id>`, `x < y`) are stripped by the server's
+        /// HTML sanitizer — write `&lt;id&gt;` to keep them.
         #[arg(long)]
         description: Option<String>,
         /// Prime label sets what the nest *is*: project, goal, result, checklist, meeting,
@@ -73,7 +75,9 @@ pub enum NestsCmd {
         /// One-line *why* (inherited from the parent if unset). Body text goes in --description.
         #[arg(long)]
         purpose: Option<String>,
-        /// The body: the actual details/content of the nest.
+        /// The body: the actual details/content of the nest. Renders as Markdown in the
+        /// web app; literal angle brackets (`<id>`, `x < y`) are stripped by the server's
+        /// HTML sanitizer — write `&lt;id&gt;` to keep them.
         #[arg(long)]
         description: Option<String>,
         /// Due date, ISO format (e.g. 2026-07-01).

@@ -20,12 +20,20 @@ pub enum CommentsCmd {
     /// Add a comment to a nest.
     Add {
         nest_id: String,
+        /// Comment text. Renders as Markdown in the web app (headings, **bold**, lists,
+        /// `code`, links). Literal angle brackets are stripped by the server's HTML
+        /// sanitizer — write `&lt;id&gt;` for a literal `<id>`.
         body: String,
         #[arg(long = "label")]
         labels: Vec<String>,
     },
     /// Edit a comment's text.
-    Edit { comment_id: String, body: String },
+    Edit {
+        comment_id: String,
+        /// New comment text. Renders as Markdown; literal `<…>` is stripped by the
+        /// server's HTML sanitizer (write `&lt;id&gt;` for a literal `<id>`).
+        body: String,
+    },
     /// Delete a comment.
     Delete { comment_id: String },
 }
@@ -42,6 +50,16 @@ pub async fn fetch_list(
     Ok((data, meta))
 }
 
+// A comment is a nest with `type:"comment"` whose text lives in the nest's `title`
+// field. The two endpoints below take DIFFERENT field names on purpose — match each
+// route's documented OpenAPI schema, not each other:
+//   - create → POST /nests/{id}/posts uses the `PostWrite` schema, which names the
+//     text `body` (the server maps `body`→`title` internally; the response re-exposes
+//     `title` as `body`).
+//   - edit → PATCH /nests/{id} is the generic nest update (`NestWrite` schema), which
+//     names the text `title`; there is no dedicated post-edit route.
+// They look inconsistent but each is correct. Don't "align" edit to send `body`: that
+// works only via undocumented mapping and could break — keep them matched to the schemas.
 pub async fn add_comment(
     client: &NestrClient,
     nest_id: &str,
@@ -49,6 +67,7 @@ pub async fn add_comment(
     labels: &[String],
 ) -> crate::error::Result<Value> {
     let mut map = serde_json::Map::new();
+    // `PostWrite` field name (see the note above on body-vs-title).
     map.insert("body".into(), body.into());
     map.insert("parentId".into(), nest_id.into());
     if !labels.is_empty() {
@@ -66,6 +85,8 @@ pub async fn edit_comment(
     comment_id: &str,
     body: &str,
 ) -> crate::error::Result<Value> {
+    // `NestWrite` field name — the generic nest PATCH names the text `title`, not
+    // `body` (see the note on add_comment above).
     let raw: Value = client
         .patch(&format!("/nests/{comment_id}"), &json!({ "title": body }))
         .await?;
