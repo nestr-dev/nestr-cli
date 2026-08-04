@@ -1,10 +1,20 @@
 version: 2
+# `groups` applies to version updates only — security updates still arrive as
+# their own PR so they stay individually visible and mergeable in isolation.
 updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
   - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      cargo:
+        patterns:
+          - "*"
