@@ -8,18 +8,25 @@ use anyhow::{bail, Result};
 use url::{Host, Url};
 
 /// Labels that define what a Nest fundamentally *is*. Kept sorted for binary_search.
+/// The Scrum labels (epic/milestone/sprint/userstory) count too: a nest is a story
+/// OR a sprint OR an epic OR a milestone — stories relate to the containers via
+/// graph links, not by sharing labels.
 const PRIME_LABELS: &[&str] = &[
     "anchor-circle",
     "checklist",
     "circle",
+    "epic",
     "feedback",
     "goal",
     "meeting",
     "metric",
+    "milestone",
     "project",
     "result",
     "role",
+    "sprint",
     "tension",
+    "userstory",
 ];
 
 /// True if `label` is a prime label — one that defines what a Nest fundamentally *is*.
@@ -124,6 +131,15 @@ mod tests {
             PRIME_LABELS.is_sorted(),
             "PRIME_LABELS must stay sorted or is_prime's binary_search breaks silently"
         );
+    }
+
+    #[test]
+    fn scrum_labels_are_prime() {
+        // Shipped with the Scrum app; missing here meant `--label sprint --label project`
+        // slipped past the one-prime guard (issue #35, related gap).
+        for l in ["epic", "milestone", "sprint", "userstory"] {
+            assert!(is_prime(l), "{l} must be a prime label");
+        }
     }
 
     #[test]

@@ -53,8 +53,9 @@ pub enum NestsCmd {
         #[arg(long)]
         description: Option<String>,
         /// Prime label sets what the nest *is*: project, goal, result, checklist, meeting,
-        /// metric, feedback, circle, role, anchor-circle, tension. Omit for a plain todo.
-        /// Repeatable, but at most one prime label (others may be free-form, e.g. urgent).
+        /// metric, feedback, circle, role, anchor-circle, tension, userstory, sprint,
+        /// epic, milestone. Omit for a plain todo. Repeatable, but at most one prime
+        /// label (others may be free-form, e.g. urgent).
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Due date, ISO format (e.g. 2026-07-01).
@@ -65,6 +66,14 @@ pub enum NestsCmd {
         /// shows up under nobody's work — assign whoever does the work.
         #[arg(long = "assignee")]
         assignees: Vec<String>,
+        /// Set an app/namespaced field as KEY=VALUE (repeatable), e.g.
+        /// --field sprint.capacity=20 --field sprint.term='{"from":"2026-08-01","to":"2026-08-14"}'.
+        /// KEY is label.field (`nests get <id> --fields-meta` lists the codes). VALUE is
+        /// typed by a JSON parse when it is valid JSON (numbers, booleans, objects) and
+        /// sent as a plain string otherwise; quote as JSON ('"true"') to force a string.
+        /// Keys are passed through and validated by the server.
+        #[arg(long = "field")]
+        fields: Vec<String>,
     },
     /// Update fields on a nest.
     Update {
@@ -98,6 +107,11 @@ pub enum NestsCmd {
         /// anyone you want to keep. Pass the literal `me` for yourself.
         #[arg(long = "assignee")]
         assignees: Vec<String>,
+        /// Set an app/namespaced field as KEY=VALUE (repeatable), e.g.
+        /// --field sprint.status=active. Same typing rules as on create; only the
+        /// fields named are touched.
+        #[arg(long = "field")]
+        fields: Vec<String>,
     },
     /// Delete a nest (soft delete).
     Delete { id: String },
@@ -177,9 +191,37 @@ pub async fn resolve_assignees(
         .collect())
 }
 
+/// Parse repeatable `--field KEY=VALUE` pairs into the `fields` object the API
+/// accepts on create/update. KEY is the label-namespaced field path
+/// (`sprint.term`, `userstory.points`); the server resolves it against the
+/// nest's label schema, so unknown keys are passed through rather than guessed
+/// at client-side. VALUE is typed by a JSON parse when it is valid JSON
+/// (`20` → number, `true` → bool, `{…}` → object, `"true"` → string) and sent
+/// as a plain string otherwise.
+pub fn parse_field_args(pairs: &[String]) -> crate::error::Result<serde_json::Map<String, Value>> {
+    let mut fields = serde_json::Map::new();
+    for pair in pairs {
+        let Some((key, raw)) = pair.split_once('=') else {
+            return Err(crate::error::NestrError::Validation(format!(
+                "--field expects KEY=VALUE, got '{pair}' (e.g. --field sprint.capacity=20)"
+            )));
+        };
+        if key.is_empty() {
+            return Err(crate::error::NestrError::Validation(format!(
+                "--field expects KEY=VALUE with a non-empty key, got '{pair}'"
+            )));
+        }
+        let value =
+            serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.into()));
+        fields.insert(key.to_string(), value);
+    }
+    Ok(fields)
+}
+
 /// Assemble the `POST /nests` body. Pure so the field mapping — including the
 /// `users` assignment that an unassigned project would otherwise miss — is unit
 /// testable without a client. Optional fields are omitted (not sent as null/empty).
+#[allow(clippy::too_many_arguments)]
 pub fn create_body(
     title: String,
     parent: Option<String>,
@@ -188,6 +230,7 @@ pub fn create_body(
     labels: &[String],
     due: Option<String>,
     users: &[String],
+    fields: &serde_json::Map<String, Value>,
 ) -> Value {
     let mut body = serde_json::Map::new();
     body.insert("title".into(), title.into());
@@ -209,6 +252,9 @@ pub fn create_body(
     if !users.is_empty() {
         body.insert("users".into(), Value::from(users.to_vec()));
     }
+    if !fields.is_empty() {
+        body.insert("fields".into(), Value::Object(fields.clone()));
+    }
     Value::Object(body)
 }
 
@@ -224,6 +270,7 @@ pub fn update_body(
     parent: Option<String>,
     labels: &[String],
     users: &[String],
+    fields: &serde_json::Map<String, Value>,
 ) -> Value {
     let mut body = serde_json::Map::new();
     if let Some(t) = title {
@@ -249,6 +296,9 @@ pub fn update_body(
     }
     if !users.is_empty() {
         body.insert("users".into(), Value::from(users.to_vec()));
+    }
+    if !fields.is_empty() {
+        body.insert("fields".into(), Value::Object(fields.clone()));
     }
     Value::Object(body)
 }
@@ -397,11 +447,22 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             labels,
             due,
             assignees,
+            fields,
         } => {
             safety::enforce_read_only(g.read_only, "nests create")?;
             validation::validate_prime_labels(&labels)?;
+            let field_values = parse_field_args(&fields)?;
             let users = resolve_assignees(&client, &assignees).await?;
-            let body = create_body(title, parent, purpose, description, &labels, due, &users);
+            let body = create_body(
+                title,
+                parent,
+                purpose,
+                description,
+                &labels,
+                due,
+                &users,
+                &field_values,
+            );
             let data = create_nest(&client, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
@@ -415,11 +476,13 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             parent,
             labels,
             assignees,
+            fields,
         } => {
             safety::enforce_read_only(g.read_only, "nests update")?;
             if !labels.is_empty() {
                 validation::validate_prime_labels(&labels)?;
             }
+            let field_values = parse_field_args(&fields)?;
             let users = resolve_assignees(&client, &assignees).await?;
             let body = update_body(
                 title,
@@ -430,6 +493,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 parent,
                 &labels,
                 &users,
+                &field_values,
             );
             let data = update_nest(&client, &id, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;

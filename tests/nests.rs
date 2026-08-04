@@ -111,6 +111,7 @@ fn create_body_maps_fields_and_assigns_users() {
         &["project".into()],
         Some("2026-07-01".into()),
         &["meId".into()],
+        &serde_json::Map::new(),
     );
     assert_eq!(body["title"], "bsv-eu-dr-01");
     assert_eq!(body["parentId"], "role1");
@@ -125,7 +126,16 @@ fn create_body_maps_fields_and_assigns_users() {
 
 #[test]
 fn create_body_omits_users_and_optionals_when_absent() {
-    let body = nests::create_body("Loose todo".into(), None, None, None, &[], None, &[]);
+    let body = nests::create_body(
+        "Loose todo".into(),
+        None,
+        None,
+        None,
+        &[],
+        None,
+        &[],
+        &serde_json::Map::new(),
+    );
     assert_eq!(body["title"], "Loose todo");
     // No assignee → no `users` key at all (don't send an empty array).
     assert!(body.get("users").is_none());
@@ -144,6 +154,7 @@ fn update_body_sets_users_only_when_given() {
         None,
         &[],
         &["u1".into(), "u2".into()],
+        &serde_json::Map::new(),
     );
     assert_eq!(body["users"], serde_json::json!(["u1", "u2"]));
     assert_eq!(
@@ -152,7 +163,17 @@ fn update_body_sets_users_only_when_given() {
         "only `users` should be set"
     );
 
-    let empty = nests::update_body(None, None, None, None, None, None, &[], &[]);
+    let empty = nests::update_body(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        &[],
+        &serde_json::Map::new(),
+    );
     assert!(empty.as_object().unwrap().is_empty());
 }
 
@@ -299,4 +320,106 @@ async fn read_only_blocks_delete_before_writing() {
     );
 
     std::env::remove_var("NESTR_HOME");
+}
+
+// --- --field: app/namespaced field writes (issue #35) ---
+
+#[test]
+fn parse_field_args_types_json_values_and_keeps_strings() {
+    let fields = nests::parse_field_args(&[
+        "sprint.capacity=20".into(),
+        "sprint.status=active".into(),
+        r#"sprint.term={"from":"2026-08-01","to":"2026-08-14"}"#.into(),
+        "userstory.points=3.5".into(),
+        "custom.flag=true".into(),
+        r#"custom.forced_string="true""#.into(),
+    ])
+    .unwrap();
+    assert_eq!(fields["sprint.capacity"], serde_json::json!(20));
+    assert_eq!(fields["sprint.status"], serde_json::json!("active"));
+    assert_eq!(
+        fields["sprint.term"],
+        serde_json::json!({"from":"2026-08-01","to":"2026-08-14"})
+    );
+    assert_eq!(fields["userstory.points"], serde_json::json!(3.5));
+    assert_eq!(fields["custom.flag"], serde_json::json!(true));
+    // Quoting the value as JSON forces a string even when it would parse as
+    // another type.
+    assert_eq!(fields["custom.forced_string"], serde_json::json!("true"));
+}
+
+#[test]
+fn parse_field_args_keeps_equals_signs_in_values() {
+    let fields = nests::parse_field_args(&["custom.formula=a=b".into()]).unwrap();
+    assert_eq!(fields["custom.formula"], serde_json::json!("a=b"));
+}
+
+#[test]
+fn parse_field_args_rejects_malformed_pairs() {
+    let err = nests::parse_field_args(&["sprint.capacity".into()]).unwrap_err();
+    assert!(
+        err.to_string().contains("KEY=VALUE"),
+        "expected a KEY=VALUE hint, got: {err}"
+    );
+    let err = nests::parse_field_args(&["=20".into()]).unwrap_err();
+    assert!(
+        err.to_string().contains("KEY=VALUE"),
+        "expected a KEY=VALUE hint, got: {err}"
+    );
+}
+
+#[test]
+fn create_body_includes_fields_object() {
+    let fields = nests::parse_field_args(&[
+        "sprint.capacity=20".into(),
+        r#"sprint.term={"from":"2026-08-01","to":"2026-08-14"}"#.into(),
+    ])
+    .unwrap();
+    let body = nests::create_body(
+        "Sprint 12".into(),
+        Some("circle1".into()),
+        None,
+        None,
+        &["sprint".into()],
+        None,
+        &[],
+        &fields,
+    );
+    assert_eq!(
+        body["fields"],
+        serde_json::json!({
+            "sprint.capacity": 20,
+            "sprint.term": {"from":"2026-08-01","to":"2026-08-14"}
+        })
+    );
+}
+
+#[test]
+fn create_body_omits_fields_when_absent() {
+    let body = nests::create_body(
+        "Loose todo".into(),
+        None,
+        None,
+        None,
+        &[],
+        None,
+        &[],
+        &serde_json::Map::new(),
+    );
+    assert!(body.get("fields").is_none());
+}
+
+#[test]
+fn update_body_includes_fields_object() {
+    let fields = nests::parse_field_args(&["sprint.status=active".into()]).unwrap();
+    let body = nests::update_body(None, None, None, None, None, None, &[], &[], &fields);
+    assert_eq!(
+        body["fields"],
+        serde_json::json!({"sprint.status": "active"})
+    );
+    assert_eq!(
+        body.as_object().unwrap().len(),
+        1,
+        "only `fields` should be set"
+    );
 }

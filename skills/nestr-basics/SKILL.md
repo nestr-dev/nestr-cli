@@ -46,7 +46,8 @@ nestr plan today                         # see today's plan
 
 What a nest **is** is set by one **prime label** (`project`, `goal`, `result`,
 `checklist`, `meeting`, `metric`, `feedback`, `circle`, `role`, `anchor-circle`,
-`tension`). No prime label = a plain todo. There's no `project create` — `nests
+`tension`, `userstory`, `sprint`, `epic`, `milestone`). No prime label = a plain
+todo. There's no `project create` — `nests
 create --label <prime>` makes each kind, and `--parent` nests it as a subtask.
 
 ```bash
