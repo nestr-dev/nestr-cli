@@ -226,6 +226,46 @@ async fn label_add_rejects_a_second_prime_before_writing() {
 }
 
 #[tokio::test]
+async fn label_add_allows_userstory_on_an_existing_project() {
+    // Promoting a project to a Scrum story. `userstory` implies `project` in the
+    // data model (nestr-web `packages/nestr_scrum/labels.js`), so this is not a
+    // second identity and the guard must let it through.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n4"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n4","title":"Ship the thing","labels":["project"]}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    nests::ensure_prime_compatible(&client, "n4", "userstory")
+        .await
+        .expect("userstory implies project, so adding it to a project is allowed");
+}
+
+#[tokio::test]
+async fn label_add_still_rejects_sprint_on_a_project() {
+    // Only `userstory` carries an implication — a sprint is a separate container.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n5"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n5","title":"Ship the thing","labels":["project"]}
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = nests::ensure_prime_compatible(&client, "n5", "sprint")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("already a 'project'"),
+        "expected a one-prime error, got: {err}"
+    );
+}
+
+#[tokio::test]
 async fn label_add_allows_a_prime_when_the_nest_has_none() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
