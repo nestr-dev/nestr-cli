@@ -62,7 +62,8 @@ returns nothing, the nest may simply live in **another** workspace: list them wi
 
 Everything in Nestr is a **Nest**. What a nest *is* is set by exactly **one prime
 label** (see below): circles, roles, projects, goals, and tensions are all nests
-carrying their prime label, and a nest with no prime label is a plain todo. Comments
+carrying their prime label, and a nest with no prime label is a plain todo (the
+server attaches the non-prime `task` label to it automatically). Comments
 and inbox items are lighter nests of their own. Responses come in a few shapes
 (`{status, data, …}`, a bare array, or a bare object); `-o json` always prints the
 raw unwrapped data.
@@ -75,7 +76,10 @@ exception — it pages with `--limit`/`--skip`.)
 
 What a nest *is* is set by exactly **one prime label**; the CLI rejects two or more
 ("A nest can have only one prime label"). A nest with **no** prime label is a plain
-todo. The 11 prime label codes — pass these to `--label`:
+todo: the server attaches the non-prime `task` label to every completable nest
+automatically, so pass `--label task` when creating one to be explicit, and use
+`label:task` in search to find todos. The 15 prime label codes — pass these to
+`--label`:
 
 | code | what it is |
 |---|---|
@@ -90,9 +94,33 @@ todo. The 11 prime label codes — pass these to `--label`:
 | `role` | a role within a circle |
 | `anchor-circle` | the top-level anchor circle |
 | `tension` | a governance tension |
+| `userstory` | a Scrum user story |
+| `sprint` | a Scrum sprint |
+| `epic` | a Scrum epic |
+| `milestone` | a Scrum milestone |
 
 Other labels (e.g. `urgent`, `now`) are free-form, not prime — discover them with
 `nestr labels list`. `now` is the label `plan add`/`plan remove` toggle.
+
+## App fields (--field)
+
+App labels carry namespaced fields (`sprint.term`, `sprint.capacity`,
+`userstory.points`, `result.target_complete`, …). Set them on `nests create` and
+`nests update` with the repeatable `--field KEY=VALUE` flag:
+
+```sh
+nestr nests create --title "Sprint 12" --label sprint --parent <circleId> \
+  --field sprint.term='{"from":"2026-08-01","to":"2026-08-14"}' \
+  --field sprint.capacity=20 --yes
+
+nestr nests update <id> --field sprint.status=active --yes
+```
+
+KEY is `label.field` — `nestr nests get <id> --fields-meta` lists the codes for a
+nest's labels. VALUE is typed by a JSON parse when it is valid JSON (`20` becomes a
+number, `true` a boolean, `{…}` an object) and is sent as a plain string otherwise;
+quote as JSON (`'"true"'`) to force a string. Unknown keys are passed through and
+validated by the server.
 
 ## Purpose vs description
 

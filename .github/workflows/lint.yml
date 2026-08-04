@@ -31,6 +31,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # audit-check runs a bare `cargo install cargo-audit`, which resolves the
+      # latest deps and breaks whenever one of them raises its MSRV above the
+      # repo's pinned toolchain (kstring 2.0.4 needs rustc 1.96, we pin 1.94.1).
+      # Installing with --locked first uses cargo-audit's own committed lockfile;
+      # the action detects the existing binary and skips its unlocked install.
+      - name: Install cargo-audit (locked)
+        run: cargo install cargo-audit --locked
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

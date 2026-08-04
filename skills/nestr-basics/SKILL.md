@@ -7,7 +7,7 @@ description: Use when working with Nestr from the terminal — searching and rea
 
 `nestr` is a fast, composable CLI for Nestr. Everything in Nestr is a **Nest**, and
 what a nest *is* is set by a single **prime label** (`project`, `goal`, `role`, …) —
-a nest with no prime label is a plain todo. Pick a profile once (`nestr profiles add`),
+a nest with no prime label is a plain todo, labelled `task`. Pick a profile once (`nestr profiles add`),
 then work the loop below. Add `-o json` to any command for raw JSON to pipe to `jq`.
 Full setup, global flags, and the command map:
 [shared/reference.md](https://github.com/nestr-dev/nestr-cli/blob/main/skills/shared/reference.md).
@@ -46,18 +46,20 @@ nestr plan today                         # see today's plan
 
 What a nest **is** is set by one **prime label** (`project`, `goal`, `result`,
 `checklist`, `meeting`, `metric`, `feedback`, `circle`, `role`, `anchor-circle`,
-`tension`). No prime label = a plain todo. There's no `project create` — `nests
+`tension`, `userstory`, `sprint`, `epic`, `milestone`). No prime label = a plain
+todo, which the server labels `task` automatically; pass `--label task` to be
+explicit, and search todos with `label:task`. There's no `project create` — `nests
 create --label <prime>` makes each kind, and `--parent` nests it as a subtask.
 
 ```bash
-nestr nests create --title "Fix the login bug" --parent <projectId> --assignee me   # a plain todo, assigned to you
+nestr nests create --title "Fix the login bug" --parent <projectId> --label task --assignee me   # a todo, assigned to you
 nestr nests create --title "Write the spec" --parent <id> --label project \
   --description "Scope, milestones, open questions" --due 2026-07-01 --assignee me   # a project
 nestr nests create --title "Pre-launch checklist" --parent <projectId> --label checklist
 ```
 
 - `--label project` (or any prime) is what makes it that kind — **omit it and you get a
-  plain todo, not a project.** A nest can carry only one prime label.
+  plain `task`-labelled todo, not a project.** A nest can carry only one prime label.
 - `--assignee` sets who does the work (the nest's `users`). **A project or task created
   with no `--assignee` is unassigned — it shows under nobody's work.** Pass `me` for
   yourself, or a user id from `nestr users list` (repeatable for several people).
