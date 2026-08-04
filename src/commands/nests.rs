@@ -54,8 +54,9 @@ pub enum NestsCmd {
         description: Option<String>,
         /// Prime label sets what the nest *is*: project, goal, result, checklist, meeting,
         /// metric, feedback, circle, role, anchor-circle, tension, userstory, sprint,
-        /// epic, milestone. Omit for a plain todo. Repeatable, but at most one prime
-        /// label (others may be free-form, e.g. urgent).
+        /// epic, milestone. A plain todo is the non-prime `task` label (the server
+        /// attaches it automatically when you omit labels; pass it to be explicit).
+        /// Repeatable, but at most one prime label (others may be free-form, e.g. urgent).
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Due date, ISO format (e.g. 2026-07-01).

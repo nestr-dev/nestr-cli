@@ -62,7 +62,8 @@ returns nothing, the nest may simply live in **another** workspace: list them wi
 
 Everything in Nestr is a **Nest**. What a nest *is* is set by exactly **one prime
 label** (see below): circles, roles, projects, goals, and tensions are all nests
-carrying their prime label, and a nest with no prime label is a plain todo. Comments
+carrying their prime label, and a nest with no prime label is a plain todo (the
+server attaches the non-prime `task` label to it automatically). Comments
 and inbox items are lighter nests of their own. Responses come in a few shapes
 (`{status, data, …}`, a bare array, or a bare object); `-o json` always prints the
 raw unwrapped data.
@@ -75,7 +76,10 @@ exception — it pages with `--limit`/`--skip`.)
 
 What a nest *is* is set by exactly **one prime label**; the CLI rejects two or more
 ("A nest can have only one prime label"). A nest with **no** prime label is a plain
-todo. The 15 prime label codes — pass these to `--label`:
+todo: the server attaches the non-prime `task` label to every completable nest
+automatically, so pass `--label task` when creating one to be explicit, and use
+`label:task` in search to find todos. The 15 prime label codes — pass these to
+`--label`:
 
 | code | what it is |
 |---|---|
