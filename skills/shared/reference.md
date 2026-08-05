@@ -94,10 +94,19 @@ automatically, so pass `--label task` when creating one to be explicit, and use
 | `role` | a role within a circle |
 | `anchor-circle` | the top-level anchor circle |
 | `tension` | a governance tension |
-| `userstory` | a Scrum user story |
+| `userstory` | a Scrum user story (also carries `project` — see below) |
 | `sprint` | a Scrum sprint |
 | `epic` | a Scrum epic |
 | `milestone` | a Scrum milestone |
+
+**One exception to the one-prime rule:** `userstory` **implies** `project` — every
+story is also a project, so it inherits status, completion, and workspace-wide
+reporting. The server adds `project` itself whenever you apply `userstory`, so a
+story always carries both, and `--label userstory --label project` is accepted.
+`sprint`, `epic`, and `milestone` carry no such implication and must **not** be
+combined with `project` or with each other; stories relate to those containers
+through graph links (`userstory_sprint`, `userstory_epic`, `userstory_milestone`),
+never by sharing labels.
 
 Other labels (e.g. `urgent`, `now`) are free-form, not prime — discover them with
 `nestr labels list`. `now` is the label `plan add`/`plan remove` toggle.

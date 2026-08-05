@@ -57,6 +57,7 @@ pub enum NestsCmd {
         /// epic, milestone. A plain todo is the non-prime `task` label (the server
         /// attaches it automatically when you omit labels; pass it to be explicit).
         /// Repeatable, but at most one prime label (others may be free-form, e.g. urgent).
+        /// Exception: `userstory` implies `project`, so that pair is accepted.
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Due date, ISO format (e.g. 2026-07-01).
@@ -100,8 +101,9 @@ pub enum NestsCmd {
         #[arg(long)]
         parent: Option<String>,
         /// Replace the label set (repeatable) — sends the full set, not a delta, so re-list
-        /// any labels you want to keep. At most one prime label. To toggle a single label
-        /// without touching the rest, use `nests label add/remove`.
+        /// any labels you want to keep. At most one prime label, except `userstory` with its
+        /// implied `project` (a story carries both, so re-list both). To toggle a single
+        /// label without touching the rest, use `nests label add/remove`.
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Replace the assigned user(s) by id (repeatable) — sends the full set, so re-list
