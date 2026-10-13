@@ -97,6 +97,7 @@ fn save_oauth_profile(name: &str, host: &str) {
             id_token: None,
             expiry: Some(0),
         }),
+        client_instance_id: None,
         default_output_format: None,
     };
     save_profile(name, &profile).unwrap();
