@@ -296,13 +296,26 @@ fn without_bytes(file: &Value) -> Value {
 }
 
 fn write_new_file(dest: &Path, bytes: &[u8], force: bool) -> Result<()> {
-    if !force && dest.exists() {
-        bail!(
+    use std::io::Write as _;
+    // create_new checks and creates in one step (no window between them, and it
+    // refuses an existing symlink rather than writing through it).
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true);
+    if force {
+        opts.create(true).truncate(true);
+    } else {
+        opts.create_new(true);
+    }
+    let mut f = match opts.open(dest) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => bail!(
             "{} already exists; pass --force to overwrite it.",
             dest.display()
-        );
-    }
-    std::fs::write(dest, bytes).with_context(|| format!("writing {}", dest.display()))
+        ),
+        Err(e) => return Err(e).with_context(|| format!("writing {}", dest.display())),
+    };
+    f.write_all(bytes)
+        .with_context(|| format!("writing {}", dest.display()))
 }
 
 pub async fn run(
