@@ -102,3 +102,31 @@ fn connectors_bind_rejects_unknown_owner_type() {
         "expected a clap value error, got: {stderr}"
     );
 }
+
+#[test]
+fn dm_update_requires_a_change() {
+    let out = run(&["dm", "update", "t1"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("required"),
+        "expected a clap missing-argument error, got: {stderr}"
+    );
+}
+
+#[test]
+fn unread_conflicts_with_read() {
+    for args in [
+        &["dm", "posts", "t1", "--unread", "--read"][..],
+        &["queues", "threads", "support", "--unread", "--read"][..],
+        &["comments", "list", "n1", "--unread", "--read"][..],
+    ] {
+        let out = run(args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success());
+        assert!(
+            stderr.contains("cannot be used with"),
+            "expected a clap conflict for {args:?}, got: {stderr}"
+        );
+    }
+}

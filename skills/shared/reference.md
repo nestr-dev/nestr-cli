@@ -53,8 +53,8 @@ workspace-scoped command with no active workspace errors with guidance to run
   `webhooks`, `workspaces apps`, `nests bulk-reorder`, `connectors`, and `agents` (except
   `agents mode`).
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
-  `comments`, `inbox`, `plan`, `notifications`, `tensions`, `links`, `me`, `auth`,
-  `profiles`, `workspaces list`/`get`/`use`/`create`, `agents mode`.
+  `comments`, `inbox`, `plan`, `notifications`, `dm`, `queues`, `tensions`, `links`, `me`,
+  `auth`, `profiles`, `workspaces list`/`get`/`use`/`create`, `agents mode`.
 
 **Search is workspace-scoped.** Results only come from the active workspace (or the
 `--in <nestId>` subtree) — there is no cross-workspace search endpoint. If a search
@@ -259,6 +259,7 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 | `comments` | discuss on a nest | nestr-basics |
 | `inbox`, `plan`, `work` | capture, plan the day, open work | nestr-basics |
 | `notifications`, `labels`, `projects` | stay current, labels, projects | nestr-basics |
+| `dm`, `queues` | direct messages, support queues | nestr-basics |
 | `tensions` | governance: propose → consent → enact | nestr-governance |
 | `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members | nestr-org |
 | `links`, `insights`, `export` | graph links, metrics, JSON dumps | nestr-insights |

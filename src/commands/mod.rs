@@ -6,6 +6,7 @@ pub mod agents;
 pub mod circles;
 pub mod comments;
 pub mod connectors;
+pub mod dm;
 pub mod export;
 pub mod groups;
 pub mod inbox;
@@ -16,6 +17,7 @@ pub mod nests;
 pub mod notifications;
 pub mod plan;
 pub mod projects;
+pub mod queues;
 pub mod recurrence;
 pub mod roles;
 pub mod search;
@@ -55,4 +57,27 @@ pub async fn resolve_client(g: &GlobalArgs) -> Result<(ResolvedConfig, NestrClie
     let client = NestrClient::with_refresh(cfg.api_base.clone(), &cfg.bearer, cfg.refresh.clone())?
         .print_notices(cfg.output);
     Ok((cfg, client))
+}
+
+/// `--unread` / `--read`: the read-marker filter the posts, DM and queue routes share.
+/// Neither flag means no filter.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub struct ReadFilter {
+    /// Only what you have not read yet.
+    #[arg(long, conflicts_with = "read")]
+    pub unread: bool,
+    /// Only what you have already read.
+    #[arg(long)]
+    pub read: bool,
+}
+
+impl ReadFilter {
+    /// The `unread` query value, if a filter was asked for.
+    pub fn param(&self) -> Option<&'static str> {
+        match (self.unread, self.read) {
+            (true, _) => Some("true"),
+            (_, true) => Some("false"),
+            _ => None,
+        }
+    }
 }

@@ -3,7 +3,7 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 
 use crate::api_client::{unwrap_data, NestrClient};
-use crate::commands::{resolve_client, GlobalArgs};
+use crate::commands::{resolve_client, GlobalArgs, ReadFilter};
 use crate::render::print_json;
 use crate::views::PostView;
 use crate::{render, safety};
@@ -16,6 +16,8 @@ pub enum CommentsCmd {
         /// Include comments on descendant nests up to this depth (or "all").
         #[arg(long)]
         depth: Option<String>,
+        #[command(flatten)]
+        filter: ReadFilter,
     },
     /// Add a comment to a nest.
     Add {
@@ -145,10 +147,17 @@ fn render_post_one(data: &Value, output: crate::config::OutputFormat) -> Result<
 pub async fn run(cmd: CommentsCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
-        CommentsCmd::List { nest_id, depth } => {
+        CommentsCmd::List {
+            nest_id,
+            depth,
+            filter,
+        } => {
             let mut params: Vec<(&str, &str)> = Vec::new();
             if let Some(d) = &depth {
                 params.push(("depth", d));
+            }
+            if let Some(u) = filter.param() {
+                params.push(("unread", u));
             }
             let (data, _) = fetch_list(&client, &nest_id, &params).await?;
             render_posts(&data, cfg.output)?;

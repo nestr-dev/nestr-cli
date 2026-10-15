@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    agents, auth, circles, comments, connectors, export, groups, inbox, insights, labels, links,
-    me, nests, notifications, plan, profiles, projects, roles, search, tensions, users, webhooks,
-    work, workspaces,
+    agents, auth, circles, comments, connectors, dm, export, groups, inbox, insights, labels,
+    links, me, nests, notifications, plan, profiles, projects, queues, roles, search, tensions,
+    users, webhooks, work, workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -29,6 +29,8 @@ use nestr_cli::config::OutputFormat;
   \x1b[1minbox\x1b[0m      Capture and manage inbox items
   \x1b[1mplan\x1b[0m       Show/manage today's plan
   \x1b[1mnotifications\x1b[0m  List and clear notifications
+  \x1b[1mdm\x1b[0m         Direct messages: list, read, post, close
+  \x1b[1mqueues\x1b[0m     Support queues and their threads
   \x1b[1mlabels\x1b[0m     List labels; manage personal labels
   \x1b[1mprojects\x1b[0m   List workspace projects
   \x1b[1mwork\x1b[0m       Show open projects and todos
@@ -151,6 +153,16 @@ enum Commands {
     Notifications {
         #[command(subcommand)]
         cmd: nestr_cli::commands::notifications::NotificationsCmd,
+    },
+    /// Direct messages: list, read, post, close.
+    Dm {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::dm::DmCmd,
+    },
+    /// Support queues and their threads.
+    Queues {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::queues::QueuesCmd,
     },
     /// Workspace and personal labels.
     Labels {
@@ -292,6 +304,8 @@ async fn run() -> anyhow::Result<()> {
         Commands::Inbox { cmd } => inbox::run(cmd, &g).await,
         Commands::Plan { cmd } => plan::run(cmd, &g).await,
         Commands::Notifications { cmd } => notifications::run(cmd, &g).await,
+        Commands::Dm { cmd } => dm::run(cmd, &g).await,
+        Commands::Queues { cmd } => queues::run(cmd, &g).await,
         Commands::Labels { cmd } => labels::run(cmd, &g).await,
         Commands::Projects { cmd } => projects::run(cmd, &g).await,
         Commands::Work => work::run(&g).await,

@@ -1,6 +1,6 @@
 use nestr_cli::api_client::NestrClient;
 use nestr_cli::commands::comments;
-use wiremock::matchers::{body_json, method, path};
+use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
@@ -54,4 +54,22 @@ async fn edit_patches_nest_with_title() {
         .await
         .unwrap();
     assert_eq!(data["title"], "edited");
+}
+
+#[tokio::test]
+async fn list_passes_unread_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/posts"))
+        .and(query_param("unread", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":[{"_id":"c2","body":"new"}]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let (data, _) = comments::fetch_list(&client, "n1", &[("unread", "true")])
+        .await
+        .unwrap();
+    assert_eq!(data[0]["_id"], "c2");
 }

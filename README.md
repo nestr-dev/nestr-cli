@@ -2,7 +2,7 @@
 
 A fast, composable command-line interface for [Nestr](https://nestr.io) — built for terminal users and AI agents.
 
-`nestr` puts the whole Nestr surface in your shell: auth & profiles, the everyday loop (search, nests, comments, inbox, plan, work), org & people, governance tensions, graph links, insights, export, webhooks, and agents & connectors. Every command speaks `-o json` for piping to `jq`, honours `--read-only`, and runs non-interactively under `--yes` for scripts and agents.
+`nestr` puts the whole Nestr surface in your shell: auth & profiles, the everyday loop (search, nests, comments, inbox, plan, work), direct messages and support queues, org & people, governance tensions, graph links, insights, export, webhooks, and agents & connectors. Every command speaks `-o json` for piping to `jq`, honours `--read-only`, and runs non-interactively under `--yes` for scripts and agents.
 
 ## Install
 
@@ -103,6 +103,7 @@ Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `
 | `search`, `nests`, `comments` | find and read/edit nests; discuss |
 | `inbox`, `plan`, `work` | capture, plan the day, open work |
 | `notifications`, `labels`, `projects` | stay current, manage labels, list projects |
+| `dm`, `queues` | direct messages, support queues |
 | `tensions` | governance: propose → consent → enact |
 | `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members |
 | `links`, `insights`, `export` | graph links, metrics, JSON dumps |
