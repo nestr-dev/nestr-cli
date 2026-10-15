@@ -233,9 +233,12 @@ async fn set_mode_puts_body_and_returns_hints() {
         None,
     )
     .unwrap();
-    let (data, hints) = agents::set_mode(&client, "n1", "a1", &body).await.unwrap();
+    let data = agents::set_mode(&client, "n1", "a1", &body).await.unwrap();
     assert_eq!(data["recheck"], "continuous");
-    assert_eq!(hints, vec!["Prefer a repeating task for a recurring job."]);
+    assert_eq!(
+        client.notices()[0]["hints"][0]["label"],
+        "Prefer a repeating task for a recurring job."
+    );
 }
 
 #[tokio::test]
@@ -251,9 +254,9 @@ async fn clear_mode_returns_cleared() {
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
     let body = agents::mode_body(None, None, None, None).unwrap();
-    let (data, hints) = agents::set_mode(&client, "n1", "a1", &body).await.unwrap();
+    let data = agents::set_mode(&client, "n1", "a1", &body).await.unwrap();
     assert_eq!(data["cleared"], true);
-    assert!(hints.is_empty());
+    assert!(client.notices().is_empty());
 }
 
 #[tokio::test]

@@ -44,9 +44,13 @@ async fn templates_keep_hints() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let (data, hints) = connectors::fetch_templates(&client, "ws1").await.unwrap();
+    let data = connectors::fetch_templates(&client, "ws1").await.unwrap();
     assert_eq!(data[0]["id"], "xero");
-    assert_eq!(hints, vec!["Register one with templateId."]);
+    let notices = client.notices();
+    assert_eq!(
+        notices[0]["hints"][0]["label"],
+        "Register one with templateId."
+    );
 }
 
 #[test]
@@ -112,11 +116,14 @@ async fn register_posts_and_keeps_hints() {
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
     let body = connectors::register_body(Some("xero".into()), None, empty_spec()).unwrap();
-    let (data, hints) = connectors::register_connector(&client, "ws1", &body)
+    let data = connectors::register_connector(&client, "ws1", &body)
         .await
         .unwrap();
     assert_eq!(data["_id"], "k2");
-    assert_eq!(hints, vec!["Bind it to a role next."]);
+    assert_eq!(
+        client.notices()[0]["hints"][0]["label"],
+        "Bind it to a role next."
+    );
 }
 
 #[test]

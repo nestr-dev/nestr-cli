@@ -229,18 +229,16 @@ pub async fn fetch_mode(
     Ok(unwrap_data(raw).0)
 }
 
-/// Returns the stored mode and the hint labels the server sends beside it.
 pub async fn set_mode(
     client: &NestrClient,
     nest: &str,
     agent: &str,
     body: &Value,
-) -> crate::error::Result<(Value, Vec<String>)> {
+) -> crate::error::Result<Value> {
     let raw: Value = client
         .put(&format!("/nests/{nest}/agents/{agent}/mode"), body)
         .await?;
-    let hints = render::hint_labels(&raw);
-    Ok((unwrap_data(raw).0, hints))
+    Ok(unwrap_data(raw).0)
 }
 
 pub async fn run(cmd: AgentsCmd, g: &GlobalArgs) -> Result<()> {
@@ -303,14 +301,13 @@ pub async fn run(cmd: AgentsCmd, g: &GlobalArgs) -> Result<()> {
             } => {
                 safety::enforce_read_only(g.read_only, "agents mode set")?;
                 let body = mode_body(Some(mode), recheck, start, tz)?;
-                let (data, hints) = set_mode(&client, &nest, &agent_id, &body).await?;
+                let data = set_mode(&client, &nest, &agent_id, &body).await?;
                 render::agent_mode(&data, cfg.output)?;
-                render::print_hints(&hints);
             }
             ModeCmd::Clear { agent_id, nest } => {
                 safety::enforce_read_only(g.read_only, "agents mode clear")?;
                 let body = mode_body(None, None, None, None)?;
-                let (data, _) = set_mode(&client, &nest, &agent_id, &body).await?;
+                let data = set_mode(&client, &nest, &agent_id, &body).await?;
                 render::agent_mode(&data, cfg.output)?;
             }
         },

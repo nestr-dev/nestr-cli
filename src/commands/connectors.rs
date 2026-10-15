@@ -194,29 +194,22 @@ pub async fn fetch_list(client: &NestrClient, ws: &str) -> crate::error::Result<
     Ok(unwrap_data(raw).0)
 }
 
-/// Returns the templates and the hint labels the server sends beside them.
-pub async fn fetch_templates(
-    client: &NestrClient,
-    ws: &str,
-) -> crate::error::Result<(Value, Vec<String>)> {
+pub async fn fetch_templates(client: &NestrClient, ws: &str) -> crate::error::Result<Value> {
     let raw: Value = client
         .get(&format!("/workspaces/{ws}/connector-templates"), &[])
         .await?;
-    let hints = render::hint_labels(&raw);
-    Ok((unwrap_data(raw).0, hints))
+    Ok(unwrap_data(raw).0)
 }
 
-/// Returns the registered connector and any hint (e.g. "a template exists for this url").
 pub async fn register_connector(
     client: &NestrClient,
     ws: &str,
     body: &Value,
-) -> crate::error::Result<(Value, Vec<String>)> {
+) -> crate::error::Result<Value> {
     let raw: Value = client
         .post(&format!("/workspaces/{ws}/connectors"), body)
         .await?;
-    let hints = render::hint_labels(&raw);
-    Ok((unwrap_data(raw).0, hints))
+    Ok(unwrap_data(raw).0)
 }
 
 pub async fn update_connector(
@@ -322,9 +315,8 @@ pub async fn run(cmd: ConnectorsCmd, g: &GlobalArgs) -> Result<()> {
             render::output_connectors(&data, cfg.output)?;
         }
         ConnectorsCmd::Templates => {
-            let (data, hints) = fetch_templates(&client, &ws).await?;
+            let data = fetch_templates(&client, &ws).await?;
             render::output_connector_templates(&data, cfg.output)?;
-            render::print_hints(&hints);
         }
         ConnectorsCmd::Register {
             template,
@@ -333,9 +325,8 @@ pub async fn run(cmd: ConnectorsCmd, g: &GlobalArgs) -> Result<()> {
         } => {
             safety::enforce_read_only(g.read_only, "connectors register")?;
             let body = register_body(template, name, spec)?;
-            let (data, hints) = register_connector(&client, &ws, &body).await?;
+            let data = register_connector(&client, &ws, &body).await?;
             render::connector_detail(&data, cfg.output)?;
-            render::print_hints(&hints);
         }
         ConnectorsCmd::Update {
             connector_id,

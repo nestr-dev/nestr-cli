@@ -809,28 +809,6 @@ pub fn webhook_detail(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-/// The `label` of each entry in a response's `hints` array (next-step advice the
-/// agent and connector routes return beside `data`).
-pub fn hint_labels(raw: &Value) -> Vec<String> {
-    raw.get("hints")
-        .and_then(Value::as_array)
-        .map(|hints| {
-            hints
-                .iter()
-                .filter_map(|h| h.get("label").and_then(Value::as_str))
-                .map(clean_text)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Print hints to stderr so `-o json` stdout stays the bare data.
-pub fn print_hints(hints: &[String]) {
-    for h in hints {
-        eprintln!("{} {h}", "hint:".cyan());
-    }
-}
-
 fn yes_no(b: Option<bool>) -> String {
     match b {
         Some(true) => "yes".into(),
