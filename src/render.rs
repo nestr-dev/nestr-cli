@@ -172,8 +172,14 @@ pub fn output_nest_detail(data: &Value, host: &str, output: OutputFormat) -> Res
             if !n.labels.is_empty() {
                 println!("labels: {}", clean_text(&n.labels_str()));
             }
+            if let Some(s) = &n.start {
+                println!("start: {s}");
+            }
             if let Some(d) = &n.due {
                 println!("due: {d}");
+            }
+            if n.all_day == Some(true) {
+                println!("all-day: true");
             }
             if let Some(c) = n.completed {
                 println!("completed: {c}");

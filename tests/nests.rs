@@ -464,3 +464,58 @@ fn update_body_includes_fields_object() {
         "only `fields` should be set"
     );
 }
+
+#[test]
+fn apply_schedule_sends_start_and_all_day() {
+    let mut body = serde_json::json!({"title": "Offsite"});
+    nests::apply_schedule(&mut body, Some("2026-10-05".into()), Some(true), false);
+    assert_eq!(body["start"], "2026-10-05");
+    assert_eq!(body["allDay"], true);
+    assert_eq!(body["title"], "Offsite");
+}
+
+#[test]
+fn apply_schedule_sends_all_day_false_to_flip_back_to_instants() {
+    let mut body = serde_json::json!({});
+    nests::apply_schedule(&mut body, None, Some(false), false);
+    assert_eq!(body, serde_json::json!({"allDay": false}));
+}
+
+#[test]
+fn apply_schedule_clear_start_sends_null() {
+    let mut body = serde_json::json!({});
+    nests::apply_schedule(&mut body, None, None, true);
+    assert_eq!(body, serde_json::json!({"start": null}));
+}
+
+#[test]
+fn apply_schedule_leaves_body_alone_when_nothing_given() {
+    let mut body = serde_json::json!({"title": "x"});
+    nests::apply_schedule(&mut body, None, None, false);
+    assert_eq!(body, serde_json::json!({"title": "x"}));
+}
+
+#[tokio::test]
+async fn update_with_bad_start_surfaces_the_servers_422() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/n1"))
+        .and(wiremock::matchers::body_json(
+            serde_json::json!({"start": "next tuesday"}),
+        ))
+        .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+            "status": "error",
+            "message": "start must be an ISO 8601 date-time or a yyyy-mm-dd date"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut body = serde_json::json!({});
+    nests::apply_schedule(&mut body, Some("next tuesday".into()), None, false);
+    let err = nests::update_nest(&client, "n1", &body).await.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "validation error: start must be an ISO 8601 date-time or a yyyy-mm-dd date"
+    );
+}

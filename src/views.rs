@@ -21,6 +21,10 @@ pub struct CompactNest {
     pub labels: Vec<Value>,
     #[serde(default)]
     pub due: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default, rename = "allDay")]
+    pub all_day: Option<bool>,
     #[serde(default, rename = "parentId")]
     pub parent_id: Option<String>,
 }
@@ -515,6 +519,16 @@ mod tests {
         assert_eq!(n.title, "T");
         assert!(n.due.is_none());
         assert_eq!(n.labels_str(), "");
+    }
+
+    #[test]
+    fn compact_nest_reads_the_schedule() {
+        let n: CompactNest = serde_json::from_value(json!({
+            "start":"2026-10-05T00:00:00.000Z","due":"2026-10-09T00:00:00.000Z","allDay":true
+        }))
+        .unwrap();
+        assert_eq!(n.start.as_deref(), Some("2026-10-05T00:00:00.000Z"));
+        assert_eq!(n.all_day, Some(true));
     }
 
     #[test]

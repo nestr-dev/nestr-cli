@@ -60,9 +60,21 @@ pub enum NestsCmd {
         /// Exception: `userstory` implies `project`, so that pair is accepted.
         #[arg(long = "label")]
         labels: Vec<String>,
-        /// Due date, ISO format (e.g. 2026-07-01).
+        /// Due date, ISO format (e.g. 2026-07-01). With --start it is the end of the
+        /// span (a meeting's finish, a span's last day); without one, the deadline.
         #[arg(long)]
         due: Option<String>,
+        /// When it begins: an ISO 8601 date-time (2026-10-05T09:00:00+02:00), or a
+        /// yyyy-mm-dd date for a whole day. With --due it makes a span, and --due is then
+        /// the end. yyyy-mm-dd dates are all-day on UTC day edges, so they read as the
+        /// same dates in every timezone. The server refuses an unreadable date, or a due
+        /// before the start, with a validation error.
+        #[arg(long)]
+        start: Option<String>,
+        /// Whole calendar days (true) or instants (false). Bare `--all-day` means true;
+        /// yyyy-mm-dd dates imply it.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        all_day: Option<bool>,
         /// Assign user(s) to the nest by id (repeatable). Sets the nest's `users`.
         /// Pass the literal `me` to assign yourself. A project/task with no assignee
         /// shows up under nobody's work — assign whoever does the work.
@@ -91,9 +103,24 @@ pub enum NestsCmd {
         /// HTML sanitizer — write `&lt;id&gt;` to keep them.
         #[arg(long)]
         description: Option<String>,
-        /// Due date, ISO format (e.g. 2026-07-01).
+        /// Due date, ISO format (e.g. 2026-07-01). With --start it is the end of the
+        /// span (a meeting's finish, a span's last day); without one, the deadline.
         #[arg(long)]
         due: Option<String>,
+        /// When it begins: an ISO 8601 date-time (2026-10-05T09:00:00+02:00), or a
+        /// yyyy-mm-dd date for a whole day. With --due it makes a span, and --due is then
+        /// the end. yyyy-mm-dd dates are all-day on UTC day edges, so they read as the
+        /// same dates in every timezone. The server refuses an unreadable date, or a due
+        /// before the start, with a validation error.
+        #[arg(long)]
+        start: Option<String>,
+        /// Whole calendar days (true) or instants (false). Bare `--all-day` means true;
+        /// yyyy-mm-dd dates imply it.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        all_day: Option<bool>,
+        /// Remove the start, leaving --due as a plain deadline.
+        #[arg(long, conflicts_with = "start")]
+        clear_start: bool,
         /// Mark the nest done (or not).
         #[arg(long)]
         completed: Option<bool>,
@@ -306,6 +333,28 @@ pub fn update_body(
     Value::Object(body)
 }
 
+/// Add the schedule keys to a create/update body: `start`, `allDay`, and
+/// `start: null` for `--clear-start`. The server writes them through the schedule
+/// editor's own path and refuses an unreadable date with a 422.
+pub fn apply_schedule(
+    body: &mut Value,
+    start: Option<String>,
+    all_day: Option<bool>,
+    clear_start: bool,
+) {
+    let Some(map) = body.as_object_mut() else {
+        return;
+    };
+    if let Some(s) = start {
+        map.insert("start".into(), s.into());
+    } else if clear_start {
+        map.insert("start".into(), Value::Null);
+    }
+    if let Some(a) = all_day {
+        map.insert("allDay".into(), a.into());
+    }
+}
+
 pub async fn create_nest(client: &NestrClient, body: &Value) -> crate::error::Result<Value> {
     let raw: Value = client.post("/nests", body).await?;
     let (data, _, _) = unwrap_data(raw);
@@ -449,6 +498,8 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             description,
             labels,
             due,
+            start,
+            all_day,
             assignees,
             fields,
         } => {
@@ -456,7 +507,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             validation::validate_prime_labels(&labels)?;
             let field_values = parse_field_args(&fields)?;
             let users = resolve_assignees(&client, &assignees).await?;
-            let body = create_body(
+            let mut body = create_body(
                 title,
                 parent,
                 purpose,
@@ -466,6 +517,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &users,
                 &field_values,
             );
+            apply_schedule(&mut body, start, all_day, false);
             let data = create_nest(&client, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
@@ -475,6 +527,9 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             purpose,
             description,
             due,
+            start,
+            all_day,
+            clear_start,
             completed,
             parent,
             labels,
@@ -487,7 +542,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             }
             let field_values = parse_field_args(&fields)?;
             let users = resolve_assignees(&client, &assignees).await?;
-            let body = update_body(
+            let mut body = update_body(
                 title,
                 purpose,
                 description,
@@ -498,6 +553,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &users,
                 &field_values,
             );
+            apply_schedule(&mut body, start, all_day, clear_start);
             let data = update_nest(&client, &id, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
