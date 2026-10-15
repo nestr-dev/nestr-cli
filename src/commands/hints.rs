@@ -14,7 +14,7 @@ pub struct HintsArgs {
     /// Circle or other nest to roll up (default: the active workspace).
     pub nest_id: Option<String>,
     /// Count only these hint types (comma-separated).
-    #[arg(long = "type", value_name = "TYPE", value_delimiter = ',')]
+    #[arg(long = "type", alias = "hint-types", value_name = "TYPE", value_delimiter = ',')]
     pub types: Vec<String>,
     /// Drop hint types below this severity (`warning` is the "needs attention" floor).
     #[arg(long, value_parser = SEVERITIES)]
