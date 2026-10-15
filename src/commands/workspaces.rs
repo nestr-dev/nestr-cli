@@ -43,6 +43,11 @@ pub enum WorkspacesCmd {
         #[command(subcommand)]
         cmd: Option<AppsCmd>,
     },
+    /// The workspace's reference documents (constitution, handbook, …).
+    Docs {
+        #[command(subcommand)]
+        cmd: crate::commands::docs::DocsCmd,
+    },
     /// Pin the active workspace for this profile (handy for full-account profiles).
     Use {
         /// Workspace id (see `nestr workspaces list`).
@@ -165,6 +170,7 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
             let (data, meta) = fetch_list(&client, &params).await?;
             render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
+        WorkspacesCmd::Docs { cmd } => crate::commands::docs::run(cmd, &cfg, &client).await?,
         WorkspacesCmd::Get { id } => {
             let data = fetch_get(&client, &id).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;

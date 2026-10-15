@@ -7,6 +7,7 @@ pub mod circles;
 pub mod comments;
 pub mod connectors;
 pub mod dm;
+pub mod docs;
 pub mod export;
 pub mod files;
 pub mod groups;
