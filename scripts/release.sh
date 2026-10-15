@@ -329,7 +329,9 @@ $notes"
   pr=$(gh pr create --base main --head "$branch" --title "$title" --body "$body")
   echo "Opened $pr"
   # Squash so main gets one commit per release; the repo deletes the branch on merge.
-  gh pr merge "$pr" --auto --squash
+  gh pr merge "$pr" --auto --squash ||
+    die "could not arm auto-merge on $pr. Arm it with 'gh pr merge $pr --auto --squash' (or merge it once approved), then once it merges run:
+  git fetch origin main && git tag -a $tag -m $tag <merge-commit-sha> && git push origin $tag"
   git switch main
 
   merge_sha=$(wait_for_merge "$pr" "$tag")

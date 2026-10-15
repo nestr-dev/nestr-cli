@@ -24,6 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # Later jobs check out this exact commit, not the tag name: a bare name can
+    # resolve to a branch of the same name, and a tag can move between jobs.
+    outputs:
+      sha: ${{ steps.on-main.outputs.sha }}
     steps:
       - name: Check tag format
         run: |
@@ -42,12 +46,14 @@ jobs:
       # alone signs and publishes a release. Only build commits that reached
       # main, which means they passed review and the required checks.
       - name: Check the tagged commit is on main
+        id: on-main
         run: |
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
             echo "::error::$RELEASE_TAG ($(git rev-parse HEAD)) is not on main. Release with scripts/release.sh so the bump is merged first."
             exit 1
           fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Check version match
         run: |
@@ -90,7 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.verify-version.outputs.sha }}
 
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
@@ -136,7 +142,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [verify-version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -144,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.verify-version.outputs.sha }}
         # required for the anchore/sbom-action workspace scan below
 
       - name: Download artifacts
@@ -191,7 +197,7 @@ jobs:
   # admits only v* tags, so workflows on other refs can't read it.
   homebrew:
     name: Update Homebrew tap
-    needs: release
+    needs: [verify-version, release]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: release
@@ -200,7 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.verify-version.outputs.sha }}
 
       - name: Render formula and push to the tap
         env:
