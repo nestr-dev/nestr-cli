@@ -7,7 +7,7 @@
 //! series or of any occurrence of it.
 
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::Value;
 
 use crate::api_client::{unwrap_data, NestrClient};
@@ -64,42 +64,54 @@ pub enum RecurrenceCmd {
     },
     /// Edit one occurrence, materializing it first if it is still virtual. With no
     /// flags it only materializes. The rule and other occurrences are untouched.
-    Edit {
-        /// The series, or any occurrence of it.
-        id: String,
-        /// The occurrence's `instant` from `occurrences` (epoch milliseconds).
-        instant: String,
-        #[arg(long)]
-        title: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-        /// Due date (ISO 8601 or yyyy-mm-dd); with a start, the end of the occurrence.
-        #[arg(long)]
-        due: Option<String>,
-        /// Move this occurrence: an ISO 8601 date-time, or yyyy-mm-dd for a whole day.
-        #[arg(long)]
-        start: Option<String>,
-        /// Whole calendar days (true) or instants (false). Bare `--all-day` means true.
-        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
-        all_day: Option<bool>,
-        #[arg(long)]
-        completed: Option<bool>,
-        /// Replace this occurrence's assignees (repeatable); `me` for yourself.
-        #[arg(long = "assignee")]
-        assignees: Vec<String>,
-        /// Replace this occurrence's label set (repeatable).
-        #[arg(long = "label")]
-        labels: Vec<String>,
-        /// Set a field as KEY=VALUE (repeatable), as on `nests update`.
-        #[arg(long = "field")]
-        fields: Vec<String>,
-    },
+    Edit(Box<EditArgs>),
     /// Delete the whole series: the series nest and every occurrence, past ones
     /// included. To stop repeating and keep the nests, use `remove`.
     DeleteSeries {
         /// The series, or any occurrence of it.
         id: String,
     },
+}
+
+#[derive(Args)]
+pub struct EditArgs {
+    /// The series, or any occurrence of it.
+    pub id: String,
+    /// The occurrence's `instant` from `occurrences` (epoch milliseconds).
+    pub instant: String,
+    /// This occurrence's name.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// One-line *why*; body text goes in --description.
+    #[arg(long)]
+    pub purpose: Option<String>,
+    /// This occurrence's body (Markdown).
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Move this occurrence under a new parent id.
+    #[arg(long)]
+    pub parent: Option<String>,
+    /// Due date (ISO 8601 or yyyy-mm-dd); with a start, the end of the occurrence.
+    #[arg(long)]
+    pub due: Option<String>,
+    /// Move this occurrence: an ISO 8601 date-time, or yyyy-mm-dd for a whole day.
+    #[arg(long)]
+    pub start: Option<String>,
+    /// Whole calendar days (true) or instants (false). Bare `--all-day` means true.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    pub all_day: Option<bool>,
+    /// Mark this occurrence done (or not).
+    #[arg(long)]
+    pub completed: Option<bool>,
+    /// Replace this occurrence's assignees (repeatable); `me` for yourself.
+    #[arg(long = "assignee")]
+    pub assignees: Vec<String>,
+    /// Replace this occurrence's label set (repeatable).
+    #[arg(long = "label")]
+    pub labels: Vec<String>,
+    /// Set a field as KEY=VALUE (repeatable), as on `nests update`.
+    #[arg(long = "field")]
+    pub fields: Vec<String>,
 }
 
 /// `PATCH nests/:id/recurrence`: a rule string sets it, `None` removes it.
@@ -293,19 +305,22 @@ pub async fn run(cmd: RecurrenceCmd, g: &GlobalArgs) -> Result<()> {
             let data = skip_occurrence(&client, &id, at, following).await?;
             render::render_object(&data, output, |d| println!("{}", skip_message(d)))?;
         }
-        RecurrenceCmd::Edit {
-            id,
-            instant,
-            title,
-            description,
-            due,
-            start,
-            all_day,
-            completed,
-            assignees,
-            labels,
-            fields,
-        } => {
+        RecurrenceCmd::Edit(args) => {
+            let EditArgs {
+                id,
+                instant,
+                title,
+                purpose,
+                description,
+                parent,
+                due,
+                start,
+                all_day,
+                completed,
+                assignees,
+                labels,
+                fields,
+            } = *args;
             safety::enforce_read_only(g.read_only, "nests recurrence edit")?;
             let at = parse_instant(&instant)?;
             if !labels.is_empty() {
@@ -315,11 +330,11 @@ pub async fn run(cmd: RecurrenceCmd, g: &GlobalArgs) -> Result<()> {
             let users = resolve_assignees(&client, &assignees).await?;
             let mut body = update_body(
                 title,
-                None,
+                purpose,
                 description,
                 due,
                 completed,
-                None,
+                parent,
                 &labels,
                 &users,
                 &field_values,
