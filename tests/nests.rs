@@ -341,6 +341,7 @@ async fn read_only_blocks_delete_before_writing() {
         oauth_token_url: None,
         oauth_authorize_url: None,
         oauth_tokens: None,
+        client_instance_id: None,
         default_output_format: None,
     };
     save_profile("ro", &profile).unwrap();

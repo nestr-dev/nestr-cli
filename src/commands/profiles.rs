@@ -122,6 +122,14 @@ pub async fn run_add(name: Option<String>, host_override: Option<String>) -> Res
         oauth_token_url: None,
         oauth_authorize_url: None,
         oauth_tokens: None,
+        // Re-adding an existing profile keeps its install id, so the new login takes
+        // over that install's session instead of looking like a new install.
+        client_instance_id: Some(
+            config::load_profile(&name)
+                .ok()
+                .and_then(|p| p.client_instance_id)
+                .unwrap_or_else(config::generate_client_instance_id),
+        ),
         default_output_format: Some(OutputFormat::Text),
     };
 
@@ -130,6 +138,7 @@ pub async fn run_add(name: Option<String>, host_override: Option<String>) -> Res
             &profile.authorize_url(),
             &profile.token_url(),
             &profile.client_id(),
+            profile.client_instance_id.as_deref().unwrap_or_default(),
         )
         .await?;
         println!("Login successful.");

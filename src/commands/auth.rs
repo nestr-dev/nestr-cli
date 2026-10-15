@@ -12,7 +12,17 @@ pub async fn run_login(profile: Option<String>) -> Result<()> {
     if p.auth != AuthKind::OAuth {
         bail!("Profile '{name}' uses API-key auth. Use `nestr profiles add` to switch to OAuth.");
     }
-    let tokens = oauth::browser_login(&p.authorize_url(), &p.token_url(), &p.client_id()).await?;
+    // Persisted before the browser leg (and independent of credential storage) so the
+    // install keeps one id across logins even if this attempt fails.
+    let instance_id = config::ensure_profile_client_instance_id(&name)?;
+    p.client_instance_id = Some(instance_id.clone());
+    let tokens = oauth::browser_login(
+        &p.authorize_url(),
+        &p.token_url(),
+        &p.client_id(),
+        &instance_id,
+    )
+    .await?;
     match p.credential_storage {
         CredentialStorage::OsStore => {
             keyring_store::delete_profile(&name);

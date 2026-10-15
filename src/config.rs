@@ -60,6 +60,14 @@ pub struct Profile {
     pub oauth_authorize_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_tokens: Option<StoredOAuthTokens>,
+    /// Random per-profile install id, sent as `client_instance_id` on the OAuth
+    /// authorize request so the server can tell installs apart: without it, every
+    /// install presents the same client identity, and logging in on a second machine
+    /// (or a second profile for the same account) can sign out the first. Minted on the
+    /// first OAuth login and reused afterwards; per profile rather than per machine, so
+    /// two profiles on one machine also stay logged in side by side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_instance_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_output_format: Option<OutputFormat>,
 }
@@ -278,6 +286,38 @@ pub fn update_profile_oauth_tokens(
     }
     profile.oauth_tokens = Some(tokens.clone());
     save_profile(name, &profile)
+}
+
+/// A fresh random UUID v4 (lowercase hex), used as a profile's `client_instance_id`.
+pub fn generate_client_instance_id() -> String {
+    use rand::RngExt;
+    let mut b: [u8; 16] = rand::rng().random();
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// Return the profile's `client_instance_id`, minting and persisting one first if the
+/// profile has none (profiles created before the field existed).
+pub fn ensure_profile_client_instance_id(name: &str) -> Result<String> {
+    validate_profile_name(name)?;
+    let _lock = lock_profiles()?;
+    let mut profile = load_profile(name)?;
+    if let Some(id) = &profile.client_instance_id {
+        return Ok(id.clone());
+    }
+    let id = generate_client_instance_id();
+    profile.client_instance_id = Some(id.clone());
+    save_profile(name, &profile)?;
+    Ok(id)
 }
 
 pub fn delete_profile_file(name: &str) -> Result<()> {
@@ -511,8 +551,71 @@ mod tests {
             oauth_token_url: None,
             oauth_authorize_url: None,
             oauth_tokens: None,
+            client_instance_id: None,
             default_output_format: None,
         }
+    }
+
+    #[test]
+    fn generated_instance_id_is_a_uuid_v4_in_the_server_charset() {
+        let id = generate_client_instance_id();
+        assert!(id.len() <= 128);
+        assert!(id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')));
+        let groups: Vec<&str> = id.split('-').collect();
+        assert_eq!(
+            groups.iter().map(|g| g.len()).collect::<Vec<_>>(),
+            vec![8, 4, 4, 4, 12]
+        );
+        assert!(groups[2].starts_with('4'), "version nibble: {id}");
+        assert!(
+            matches!(groups[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'),
+            "variant nibble: {id}"
+        );
+        assert_ne!(id, generate_client_instance_id());
+    }
+
+    #[test]
+    fn profile_without_instance_id_still_loads() {
+        let raw = r#"
+auth = "o_auth"
+credential_storage = "file"
+host = "https://app.nestr.io"
+workspace_id = "ws1"
+"#;
+        let p: Profile = toml::from_str(raw).unwrap();
+        assert_eq!(p.client_instance_id, None);
+    }
+
+    #[test]
+    fn instance_id_roundtrips_through_profile_toml() {
+        let mut p = test_profile("https://app.nestr.io");
+        p.client_instance_id = Some("abc-123".into());
+        let raw = toml::to_string_pretty(&p).unwrap();
+        assert!(raw.contains("client_instance_id = \"abc-123\""));
+        let back: Profile = toml::from_str(&raw).unwrap();
+        assert_eq!(back.client_instance_id.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn ensure_instance_id_is_stable_per_profile_and_distinct_across_profiles() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("NESTR_HOME", tmp.path());
+        save_profile("a", &test_profile("https://app.nestr.io")).unwrap();
+        save_profile("b", &test_profile("https://app.nestr.io")).unwrap();
+
+        let first = ensure_profile_client_instance_id("a").unwrap();
+        let again = ensure_profile_client_instance_id("a").unwrap();
+        let other = ensure_profile_client_instance_id("b").unwrap();
+        assert_eq!(first, again);
+        assert_ne!(first, other);
+        assert_eq!(
+            load_profile("a").unwrap().client_instance_id.as_deref(),
+            Some(first.as_str())
+        );
+        std::env::remove_var("NESTR_HOME");
     }
 
     #[test]

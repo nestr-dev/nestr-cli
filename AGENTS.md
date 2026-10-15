@@ -60,6 +60,12 @@ cosign, …) are ignored.
   prints the unwrapped data; keep both `-o text` and `-o json` working for every command.
 - **Profiles = workspace + identity.** Resolution precedence: CLI flags > env
   (`NESTR_PROFILE` / `NESTR_API_KEY` / `NESTR_HOST`) > profile > defaults.
+- **OAuth install identity.** Each profile carries a random `client_instance_id`
+  (UUID v4, minted on first OAuth login, reused after), sent on the authorize URL with
+  `client_consumer`/`client_version`, so the server can tell installs apart. It must stay
+  stable per profile: a new id makes the next login look like a new install (the old
+  session is left behind), and not sending it brings back "login on machine B signs out
+  machine A".
 - **Writes go through `safety::confirm`** and must honour `--read-only`; in
   agent/non-interactive mode they require `--yes`.
 - **Responses are buffered fully in memory** (no size cap) before parsing/render.

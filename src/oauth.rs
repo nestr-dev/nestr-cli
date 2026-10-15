@@ -120,14 +120,21 @@ fn build_auth_url(
     redirect_uri: &str,
     code_challenge: &str,
     state: &str,
+    client_instance_id: &str,
 ) -> String {
+    // Identify this install on the authorize request so a login here doesn't sign out
+    // the same account's other installs. Servers that don't support these params
+    // ignore them.
     format!(
-        "{authorize_url}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
+        "{authorize_url}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}&client_consumer={}&client_version={}&client_instance_id={}",
         pct_encode(client_id),
         pct_encode(redirect_uri),
         pct_encode(SCOPES),
         pct_encode(code_challenge),
         pct_encode(state),
+        pct_encode(CLIENT_CONSUMER),
+        pct_encode(env!("CARGO_PKG_VERSION")),
+        pct_encode(client_instance_id),
     )
 }
 
@@ -244,6 +251,7 @@ pub async fn browser_login(
     authorize_url: &str,
     token_url: &str,
     client_id: &str,
+    client_instance_id: &str,
 ) -> Result<TokenResponse> {
     // The browser is sent to authorize_url carrying the PKCE challenge + state, and the
     // code comes back the same way; refuse a non-loopback cleartext http login leg.
@@ -252,7 +260,14 @@ pub async fn browser_login(
     let state = generate_state();
     let (listener, port) = bind_callback_listener()?;
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
-    let auth_url = build_auth_url(authorize_url, client_id, &redirect_uri, &challenge, &state);
+    let auth_url = build_auth_url(
+        authorize_url,
+        client_id,
+        &redirect_uri,
+        &challenge,
+        &state,
+        client_instance_id,
+    );
 
     println!("Opening browser for authentication…");
     if open::that(&auth_url).is_err() {
@@ -454,6 +469,7 @@ mod tests {
             "http://127.0.0.1:21783/callback",
             "CHALLENGE",
             "STATE",
+            "INSTANCE",
         );
         assert!(url.starts_with("https://app.nestr.io/dialog/oauth?"));
         assert!(url.contains("response_type=code"));
@@ -462,6 +478,34 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("state=STATE"));
         assert!(url.contains("scope=user%20nest"));
+    }
+
+    #[test]
+    fn auth_url_identifies_the_client_install() {
+        let url = build_auth_url(
+            "https://app.nestr.io/dialog/oauth",
+            "nestr-cli",
+            "http://127.0.0.1:21783/callback",
+            "CHALLENGE",
+            "STATE",
+            "3f2b8c1e-9d4a-4e7b-8a6c-0b1d2e3f4a5b",
+        );
+        assert!(url.contains("&client_consumer=nestr-cli"));
+        assert!(url.contains(&format!("&client_version={}", env!("CARGO_PKG_VERSION"))));
+        assert!(url.contains("&client_instance_id=3f2b8c1e-9d4a-4e7b-8a6c-0b1d2e3f4a5b"));
+    }
+
+    #[test]
+    fn auth_url_percent_encodes_instance_id() {
+        let url = build_auth_url(
+            "https://x/a",
+            "c",
+            "http://127.0.0.1:1/cb",
+            "C",
+            "S",
+            "a b&c",
+        );
+        assert!(url.contains("&client_instance_id=a%20b%26c"));
     }
 
     #[tokio::test]
