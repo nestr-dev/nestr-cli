@@ -47,6 +47,24 @@ Insights is **BETA**. All insights commands need the **Insights app** enabled in
 workspace (else `403`); filtering by `--user`/`--circle` additionally needs a **Pro**
 plan (else `402`).
 
+## Count health signals (hints)
+
+A hint on one nest says "this one has this problem"; `nestr hints` says how many
+nests under a circle (or the whole workspace) have it, in one call:
+
+```bash
+nestr hints                                   # the active workspace
+nestr hints <circleId> --min-severity warning # what needs attention in a circle
+nestr hints <circleId> --type unassigned_role --sample-size 0   # one number
+```
+
+Each row is a hint type, its severity, how many nests carry it, and a few examples.
+Don't add the counts up: one nest can carry several hints, so ask for a single
+`--type` when you want a number that sums. Types listed under **not computed** can't
+be counted in one query: they are unknown, not zero. To open every nest behind a
+count, read one with `nestr nests get <id> --hints=summary` and run the search it
+suggests.
+
 ## Export (always JSON)
 
 ```bash
@@ -59,5 +77,5 @@ nestr export work | jq '.'                  # or pipe straight to jq
 
 ## Safety
 
-Everything here is read-only except `links add`/`links remove`, which are blocked
+Everything here (including `hints`) is read-only except `links add`/`links remove`, which are blocked
 by `--read-only`. Add `-o json` to `links`/`insights` for raw structured output.

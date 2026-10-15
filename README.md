@@ -100,13 +100,13 @@ Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `
 | Group | What it does |
 |---|---|
 | `auth`, `profiles`, `me` | authenticate, switch profiles, show identity |
-| `search`, `nests`, `comments` | find and read/edit nests; discuss |
-| `inbox`, `plan`, `work` | capture, plan the day, open work |
+| `search`, `nests`, `comments` | find and read/edit nests and their files; discuss |
+| `inbox`, `plan`, `work`, `activity` | capture, plan the day, open work, recent activity |
 | `notifications`, `labels`, `projects` | stay current, manage labels, list projects |
 | `dm`, `queues` | direct messages, support queues |
 | `tensions` | governance: propose → consent → enact |
-| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members |
-| `links`, `insights`, `export` | graph links, metrics, JSON dumps |
+| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members, reference documents |
+| `links`, `insights`, `hints`, `export` | graph links, metrics, hint counts, JSON dumps |
 | `webhooks` | workspace event subscriptions |
 | `agents`, `connectors` | run agents and set their cadence; connect outside tools to roles |
 

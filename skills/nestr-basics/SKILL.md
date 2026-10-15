@@ -17,9 +17,22 @@ Full setup, global flags, and the command map:
 ```bash
 nestr search "quarterly review"          # search the active workspace
 nestr search "bug" --in <nestId>         # search within a nest subtree
+nestr search "label:project completed:false" --strict   # fail on a mistyped filter
 nestr nests get <id>                     # read one nest (or several: id1,id2)
+nestr nests get <id> --hints             # plus its health signals (or --hints=summary)
 nestr nests children <id>                # list a nest's children
+nestr nests children <id> --search "label:role"   # just the children you want
 ```
+
+**Counting? Use `--strict`.** Without it an unrecognised operator, label or field
+filter is dropped silently and you get a real, larger answer. `--strict` turns that
+into an error that names the filter.
+
+`--hints` adds contextual signals (unfilled roles, stale work, waiting projects, …),
+each with the search that finds every other nest with the same problem. On
+`nests children` it defaults to `summary`; filter with `--hint-types` and
+`--min-severity warning`. To count them across a whole circle, see `nestr hints` in
+nestr-insights.
 
 `search` is **workspace-scoped** — it only looks in the active workspace (or the
 `--in` subtree); there is no cross-workspace search. So if a search comes back empty,
@@ -38,6 +51,7 @@ nestr workspaces use <id>                # switch the active workspace, then sea
 ```bash
 nestr inbox create "Call the supplier"   # capture to your inbox
 nestr inbox list                         # see open inbox items
+nestr inbox move <id> before <otherId>   # move one inbox item (before | after)
 nestr plan add <id>                      # put a nest on today's plan
 nestr plan today                         # see today's plan
 ```
@@ -96,6 +110,25 @@ Occurrences past the next one are **virtual**: no nest exists until one is touch
 `search` won't find them. Address an occurrence by the INSTANT that `occurrences` prints,
 not by a date. `--start` with `--due` makes `--due` the end of the span. Details, and
 `remove` vs `delete-series`, are in the shared reference under "Dates & recurrence".
+
+## Files on a nest
+
+Attachments hang off a nest or a comment (pass the comment id as the nest id).
+
+```bash
+nestr nests files list <nestId>                       # id, name, type, size
+nestr nests files read <nestId> <fileId>              # prints a text/JSON file
+nestr nests files read <nestId> <fileId> --save ./spec.pdf   # any file, to disk
+nestr nests files upload <nestId> ./notes.md          # type guessed from the extension
+nestr nests files upload <nestId> ./export --name data.csv --content-type text/csv
+nestr nests files delete <nestId> <fileId> --yes      # permanent
+```
+
+`read` only prints text types; anything else needs `--save` (it won't overwrite an
+existing file without `--force`). `-o json` returns the file with its bytes in
+`dataBase64`. Images pasted into a nest's text are not in `list`, but their ids (from
+the `/file/download?id=…` reference in the content) work with `read`. Uploads over the
+server's limit (10 MB by default) are rejected.
 
 ## Discuss & post updates
 
@@ -164,10 +197,15 @@ nestr queues threads support             # threads in the `support` queue
 nestr queues threads support --read      # only the ones you have already read
 nestr work                               # your open projects + todos
 nestr projects list                      # every project in the workspace
+nestr activity                           # what you've done lately, across workspaces
+nestr activity --user <userId>           # a colleague's (or an agent's) activity
 ```
+
+`activity` needs a user-scoped (OAuth) login; a workspace API key has no user to
+report on.
 
 ## Safety
 
-Destructive commands (`nests delete`, `nests recurrence skip`/`delete-series`, `comments delete`) ask for confirmation;
+Destructive commands (`nests delete`, `nests recurrence skip`/`delete-series`, `comments delete`, `nests files delete`) ask for confirmation;
 pass `--yes` to skip it (required in agent/non-interactive contexts). Use
 `--read-only` to hard-block every write.
