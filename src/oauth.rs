@@ -81,8 +81,13 @@ fn generate_pkce() -> (String, String) {
     let mut rng = rand::rng();
     let verifier_bytes: [u8; 32] = rng.random();
     let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let challenge = pkce_challenge(&verifier);
     (verifier, challenge)
+}
+
+/// S256 code challenge: base64url (no padding) of SHA-256(verifier), RFC 7636 §4.2.
+fn pkce_challenge(verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
 fn generate_state() -> String {
@@ -431,6 +436,14 @@ mod tests {
         let expected = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
         assert_eq!(challenge, expected);
         assert!(!verifier.is_empty());
+    }
+
+    #[test]
+    fn challenge_matches_rfc7636_appendix_b() {
+        assert_eq!(
+            pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 
     #[test]
