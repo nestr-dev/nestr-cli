@@ -4,18 +4,23 @@ use serde_json::Value;
 
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
+use crate::error::NestrError;
 use crate::render::{self, print_json};
 use crate::safety;
 
+const DEPENDS_ON: &str = "depends_on";
+
+/// Graph links are directed: a link runs from a source nest to a target, and the
+/// target sees it as incoming. The order of the arguments is the direction.
 #[derive(Subcommand)]
 pub enum LinksCmd {
-    /// List graph links of a nest.
+    /// List the graph links of a nest, with each link's direction.
     List {
         nest_id: String,
         /// Filter by relation (e.g. meeting).
         #[arg(long)]
         relation: Option<String>,
-        /// in = incoming links, out = outgoing.
+        /// in = links other nests made to this one, out = links this nest made.
         #[arg(long, value_parser = ["in", "out"])]
         direction: Option<String>,
         #[arg(long)]
@@ -23,15 +28,24 @@ pub enum LinksCmd {
         #[arg(long)]
         page: Option<u32>,
     },
-    /// Link a nest to a target (bidirectional).
+    /// Add a directed link from SOURCE_ID to TARGET_ID.
+    ///
+    /// The link runs from the source to the target; the target lists it as incoming.
+    /// For a dependency, the source is the dependent and the target its predecessor:
+    /// `nestr links add <dependent> depends_on <predecessor>`. A dependency that would
+    /// create a cycle is refused. For other relations, a link that already runs the
+    /// other way is refused rather than doubled; remove it first to reverse it.
     Add {
-        nest_id: String,
+        source_id: String,
         relation: String,
         target_id: String,
     },
-    /// Remove a graph link.
+    /// Remove the link from SOURCE_ID to TARGET_ID.
+    ///
+    /// Only the link in that direction is removed. If the link runs the other way,
+    /// the error names the command that removes it.
     Remove {
-        nest_id: String,
+        source_id: String,
         relation: String,
         target_id: String,
     },
@@ -54,31 +68,73 @@ pub async fn fetch_links(
 
 pub async fn add_link(
     client: &NestrClient,
-    nest: &str,
+    source: &str,
     relation: &str,
     target: &str,
 ) -> crate::error::Result<Value> {
     let raw: Value = client
         .post(
-            &format!("/nests/{nest}/graph/{relation}"),
+            &format!("/nests/{source}/graph/{relation}"),
             &serde_json::json!({ "targetId": target }),
         )
-        .await?;
+        .await
+        .map_err(|e| explain_add_refusal(e, source, relation, target))?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
 }
 
 pub async fn remove_link(
     client: &NestrClient,
-    nest: &str,
+    source: &str,
     relation: &str,
     target: &str,
 ) -> crate::error::Result<Value> {
     let raw: Value = client
-        .delete(&format!("/nests/{nest}/graph/{relation}/{target}"))
-        .await?;
+        .delete(&format!("/nests/{source}/graph/{relation}/{target}"))
+        .await
+        .map_err(|e| explain_reverse_link(e, source, relation, target))?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
+}
+
+/// A 422 on add means the link was refused for its direction: a `depends_on` that
+/// would close a cycle, or a link that already runs from the target to the source.
+/// The API names the reason; add what to do about it in CLI terms.
+fn explain_add_refusal(e: NestrError, source: &str, relation: &str, target: &str) -> NestrError {
+    let NestrError::Validation(msg) = e else {
+        return e;
+    };
+    let refused_dependency =
+        msg.contains("would create a cycle") || msg.contains("cannot depend on each other");
+    let advice = if relation == DEPENDS_ON && refused_dependency {
+        format!(
+            "{source} depends_on {target} means {source} waits for {target}. \
+             Check which nest is the dependent, and `nestr links list {target} --relation depends_on` \
+             for the existing chain."
+        )
+    } else if msg.contains("already links to") {
+        format!(
+            "Links are directed. To reverse it, run `nestr links remove {target} {relation} {source}` first."
+        )
+    } else {
+        return NestrError::Validation(msg);
+    };
+    NestrError::Validation(format!("{msg}\n{advice}"))
+}
+
+/// DELETE only removes the link in the direction asked for. When the link exists
+/// the other way round, the API's 404 says so; say it with the CLI command instead
+/// of the HTTP call.
+fn explain_reverse_link(e: NestrError, source: &str, relation: &str, target: &str) -> NestrError {
+    match e {
+        NestrError::NotFound(msg) if msg.contains("runs the other way") => {
+            NestrError::NotFound(format!(
+                "no '{relation}' link from {source} to {target}; the link runs the other way. \
+                 Remove it with `nestr links remove {target} {relation} {source}`."
+            ))
+        }
+        other => other,
+    }
 }
 
 /// Map the CLI `--direction in|out` to the API's `incoming`/`outgoing`.
@@ -117,26 +173,38 @@ pub async fn run(cmd: LinksCmd, g: &GlobalArgs) -> Result<()> {
             render::output_links(&data, meta.as_ref(), cfg.output, true)?;
         }
         LinksCmd::Add {
-            nest_id,
+            source_id,
             relation,
             target_id,
         } => {
             safety::enforce_read_only(g.read_only, "links add")?;
-            let data = add_link(&client, &nest_id, &relation, &target_id).await?;
+            let data = add_link(&client, &source_id, &relation, &target_id).await?;
             match cfg.output {
                 crate::config::OutputFormat::Json => print_json(&data)?,
                 crate::config::OutputFormat::Text => {
-                    println!("Linked {target_id} via '{relation}'.")
+                    let existed = data
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|l| l.get("status"))
+                        .and_then(Value::as_str)
+                        == Some("already_exists");
+                    let verb = if existed { "Already linked" } else { "Linked" };
+                    println!(
+                        "{verb} {} -> {} ({}).",
+                        render::clean_text(&source_id),
+                        render::clean_text(&target_id),
+                        render::clean_text(&relation)
+                    );
                 }
             }
         }
         LinksCmd::Remove {
-            nest_id,
+            source_id,
             relation,
             target_id,
         } => {
             safety::enforce_read_only(g.read_only, "links remove")?;
-            let data = remove_link(&client, &nest_id, &relation, &target_id).await?;
+            let data = remove_link(&client, &source_id, &relation, &target_id).await?;
             match cfg.output {
                 crate::config::OutputFormat::Json => print_json(&data)?,
                 crate::config::OutputFormat::Text => {

@@ -30,6 +30,9 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 - `-o, --output text|json` — `text` (tables) or `json` (raw, for `jq`).
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).
 - `--read-only` — hard-block every write (also `NESTR_READ_ONLY=1`).
+  A read-only Nestr API key is refused server-side on every write; the CLI reports
+  that as `this API key is read-only` rather than a scope problem. Pair such a key
+  with `--read-only` to stop before the request is sent.
 
 ## Workspace context
 
@@ -67,6 +70,16 @@ server attaches the non-prime `task` label to it automatically). Comments
 and inbox items are lighter nests of their own. Responses come in a few shapes
 (`{status, data, …}`, a bare array, or a bare object); `-o json` always prints the
 raw unwrapped data.
+
+**Warnings go to stderr.** When the API says it ignored something or narrowed a
+query, the CLI prints that to **stderr** and leaves stdout as the unwrapped data:
+parts of a write it skipped (`warnings`, e.g. a read-only or deprecated `--field`), dropped search
+operators (`searchWarnings`), defaults it added (`appliedDefaults`, e.g. the
+`depth:1` that `nests children --search` gets), and response-level `hints` (e.g.
+unread posts). In text mode each prints as a `warning:` / `note:` / `hint:` line; in
+`-o json` mode each response's notices print as one compact JSON object on stderr,
+keyed as the API sends them (`{"warnings":[…]}`). Read stderr after a write: a
+`warning:` there means part of the request was not saved.
 
 Most list commands paginate with `--limit` and `--page` (page-based); pass `--page N`
 to fetch the next page when the footer shows more. (`notifications list` is the
@@ -174,7 +187,8 @@ nestr nests update <id> --assignee <userId>          # reassign (replaces the wh
 
 The canonical web permalink for a nest is **`{host}/n/{nestId}`** — the path segment is
 `/n/`, never `/nest/`, `/nests/`, or a `#/` hash route. With a known parent it is
-`{host}/n/{parentId}/{nestId}` (opens the nest in context). `nests get`/`create`/`update`
+`{host}/n/{parentId}/{nestId}#{tab}` (opens the nest in context, on the parent's tab
+that lists it: `#projects`, `#roles`, `#tasks`, …). `nests get`/`create`/`update`
 print this as a `url:` line in `-o text`; don't hand-build links from memory.
 
 ## Command map

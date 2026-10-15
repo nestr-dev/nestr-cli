@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::{header, Client, Method, StatusCode};
@@ -7,7 +7,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::RwLock;
 
+use crate::config::OutputFormat;
 use crate::error::{extract_error_detail, NestrError, Result};
+use crate::notices;
 use crate::oauth::ReactiveRefresh;
 
 const CLIENT_CONSUMER: &str = "nestr-cli";
@@ -30,6 +32,21 @@ pub fn unwrap_data(v: Value) -> (Value, Option<Value>, Option<Value>) {
         return (Value::Object(map), None, None);
     }
     (v, None, None)
+}
+
+/// The API refuses every write from a read-only API key with one 403 message
+/// (`restivus.js`, the read-only gate). Recognise it so the error says what to do
+/// instead of suggesting the token or its scopes are wrong.
+fn read_only_key_error(body: &str) -> Option<NestrError> {
+    let msg = extract_error_detail(body)?;
+    msg.contains("API key is read-only").then(|| {
+        NestrError::Permission(
+            "this API key is read-only, so Nestr refused the write. Use a key without the \
+             read-only setting to make changes, or pass --read-only (NESTR_READ_ONLY=1) to have \
+             the CLI stop before attempting writes."
+                .into(),
+        )
+    })
 }
 
 /// Reject path traversal, query/fragment injection, and out-of-alphabet segments
@@ -70,6 +87,10 @@ pub struct NestrClient {
     api_base: String,
     auth: Arc<RwLock<String>>,
     refresh: Option<ReactiveRefresh>,
+    /// Every response's notices (see `notices`), shared across clones.
+    notices: Arc<Mutex<Vec<serde_json::Map<String, Value>>>>,
+    /// When set, notices also go to stderr as they arrive, in this format.
+    print_notices: Option<OutputFormat>,
 }
 
 impl NestrClient {
@@ -113,7 +134,21 @@ impl NestrClient {
             api_base,
             auth: Arc::new(RwLock::new(bearer.to_string())),
             refresh,
+            notices: Arc::default(),
+            print_notices: None,
         })
+    }
+
+    /// Print each response's notices to stderr as it arrives. Commands get this
+    /// from `resolve_client`; tests leave it off and read `notices()` instead.
+    pub fn print_notices(mut self, output: OutputFormat) -> Self {
+        self.print_notices = Some(output);
+        self
+    }
+
+    /// The notices collected so far, one map per response that carried any.
+    pub fn notices(&self) -> Vec<serde_json::Map<String, Value>> {
+        self.notices.lock().map(|n| n.clone()).unwrap_or_default()
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str, params: &[(&str, &str)]) -> Result<T> {
@@ -148,9 +183,15 @@ impl NestrClient {
         validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
         let resp = self.send(&method, &url, query, body).await?;
-        // On a 403 with a refresh context, refresh the token once and retry.
+        // On a 403 with a refresh context, refresh the token once and retry, unless
+        // the 403 is the read-only gate: a fresh token for the same key is just as
+        // read-only.
         let resp = match (resp.status(), &self.refresh) {
             (StatusCode::FORBIDDEN, Some(r)) => {
+                let denial = resp.text().await.unwrap_or_default();
+                if let Some(e) = read_only_key_error(&denial) {
+                    return Err(e);
+                }
                 let new_token = r
                     .perform()
                     .await
@@ -172,7 +213,16 @@ impl NestrClient {
     ) -> Result<T> {
         let text = self.request_text(method, path, query, body).await?;
         let json = if text.trim().is_empty() { "{}" } else { &text };
-        Ok(serde_json::from_str(json)?)
+        let value: Value = serde_json::from_str(json)?;
+        if let Some(n) = notices::extract(&value) {
+            if let Some(output) = self.print_notices {
+                notices::emit(&n, output);
+            }
+            if let Ok(mut all) = self.notices.lock() {
+                all.push(n);
+            }
+        }
+        Ok(serde_json::from_value(value)?)
     }
 
     /// DELETE returning the raw checked body (no JSON parse) — for routes that
@@ -210,6 +260,11 @@ impl NestrClient {
         let body = resp.text().await.unwrap_or_default();
         let detail = extract_error_detail(&body);
         let msg = detail.unwrap_or_else(|| body.clone());
+        if status == StatusCode::FORBIDDEN {
+            if let Some(e) = read_only_key_error(&body) {
+                return Err(e);
+            }
+        }
         match status {
             // Nestr uses 403 for auth failures too (401 is not used).
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(NestrError::Permission(

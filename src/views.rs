@@ -186,6 +186,12 @@ pub struct AppView {
     pub title: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    /// Needs a paid plan; an enabled paid app blocks a move to Personal.
+    #[serde(default)]
+    pub paid: Option<bool>,
+    /// `app` (Applications tab) or `integration` (Integrations tab).
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 /// Extract label identifiers (handles `["code"]` and `[{code|title|_id}]`), skipping
@@ -239,6 +245,11 @@ pub struct PartView {
     pub title: Option<String>,
     #[serde(default)]
     pub items: Vec<Value>,
+    /// Operational outputs have no `items`: their labels and role sit on the part.
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// One line of a computed diff for a proposal part.

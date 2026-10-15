@@ -102,17 +102,57 @@ pub fn output_nests(
 }
 
 /// The canonical web permalink for a nest: `{host}/n/{id}`, or
-/// `{host}/n/{parentId}/{id}` when a parent context is known (opens the nest in
+/// `{host}/n/{parentId}/{id}#{tab}` when a parent context is known (opens the nest in
 /// context). The path segment is `/n/` — never `/nest/`, `/nests/`, or a `#/`
 /// hash route. Returns `None` for an empty id so callers can skip the line.
-pub fn nest_url(host: &str, parent_id: Option<&str>, id: &str) -> Option<String> {
+///
+/// The `#tab` selects the parent's tab that lists the nest. Without it the web app
+/// opens whichever tab this person last used there (or the first tab, on a circle
+/// Structure > About), so the same link shows different things to different people.
+/// It belongs to the left pane, so it is only added in the two-id form.
+pub fn nest_url(
+    host: &str,
+    parent_id: Option<&str>,
+    id: &str,
+    labels: &[String],
+) -> Option<String> {
     if id.is_empty() {
         return None;
     }
     let base = host.trim_end_matches('/');
-    Some(match parent_id.filter(|p| !p.is_empty()) {
-        Some(parent) => format!("{base}/n/{parent}/{id}"),
-        None => format!("{base}/n/{id}"),
+    Some(
+        match parent_id.filter(|p| !p.is_empty() && !p.eq_ignore_ascii_case("inbox")) {
+            Some(parent) => {
+                let tab = containing_tab(labels)
+                    .map(|t| format!("#{t}"))
+                    .unwrap_or_default();
+                format!("{base}/n/{parent}/{id}{tab}")
+            }
+            None => format!("{base}/n/{id}"),
+        },
+    )
+}
+
+/// The parent tab that lists a nest with these labels, first match wins (so a
+/// scrum story labelled `project, userstory` lands on Projects). Mirrors the
+/// MCP's `LABEL_CONTAINING_TAB`; an unmapped label gets no hash, and a hash naming
+/// a tab the parent lacks is ignored by the app, so a miss costs nothing.
+fn containing_tab(labels: &[String]) -> Option<&'static str> {
+    labels.iter().find_map(|l| {
+        Some(match l.as_str() {
+            "project" | "individual-action" | "sprint" | "epic" => "projects",
+            "task" => "tasks",
+            "role" | "circle" | "anchor-circle" => "roles",
+            "domain" | "policy" => "policies",
+            "meeting" | "governance" | "tactical" | "tension" => "meetings",
+            "metric" => "metrics",
+            "checklist" => "checklists",
+            "goal" | "result" => "goals",
+            "skill" => "skills",
+            "feedback" => "feedback",
+            "note" => "notes",
+            _ => return None,
+        })
     })
 }
 
@@ -137,7 +177,8 @@ pub fn output_nest_detail(data: &Value, host: &str, output: OutputFormat) -> Res
             if let Some(c) = n.completed {
                 println!("completed: {c}");
             }
-            if let Some(url) = nest_url(host, n.parent_id.as_deref(), &n.id) {
+            let labels = crate::views::label_codes(&n.labels);
+            if let Some(url) = nest_url(host, n.parent_id.as_deref(), &n.id, &labels) {
                 println!("url: {url}");
             }
             if let Some(h) = hint_line(data) {
@@ -356,10 +397,12 @@ pub fn app_table(apps: &[AppView]) -> String {
                 a.id.clone(),
                 a.title.clone().unwrap_or_default(),
                 if a.enabled { "✓" } else { "" }.to_string(),
+                if a.paid == Some(true) { "paid" } else { "" }.to_string(),
+                a.category.clone().unwrap_or_default(),
             ]
         })
         .collect();
-    format_table(&["ID", "TITLE", "ENABLED"], rows)
+    format_table(&["ID", "TITLE", "ENABLED", "PLAN", "CATEGORY"], rows)
 }
 
 /// Compact table for tensions.
@@ -464,13 +507,14 @@ pub fn output_parts(data: &Value, output: OutputFormat) -> Result<()> {
                         .and_then(|i| i.get("labels"))
                         .and_then(|l| l.as_array())
                         .map(|a| crate::views::join_labels(a))
-                        .unwrap_or_default();
-                    vec![p.id.clone(), action, title, labels]
+                        .unwrap_or_else(|| crate::views::join_labels(&p.labels));
+                    let role = p.role.clone().unwrap_or_default();
+                    vec![p.id.clone(), action, title, labels, role]
                 })
                 .collect();
             println!(
                 "{}",
-                format_table(&["PART", "ACTION", "TITLE", "LABELS"], rows)
+                format_table(&["PART", "ACTION", "TITLE", "LABELS", "ROLE"], rows)
             );
         }
     }
@@ -773,26 +817,69 @@ mod tests {
     fn nest_url_builds_canonical_n_path() {
         // Canonical permalink is HOST/n/{id} — path is `/n/`, never `/nest/` or `/#/nest`.
         assert_eq!(
-            nest_url("https://app.nestr.io", None, "abc"),
+            nest_url("https://app.nestr.io", None, "abc", &[]),
             Some("https://app.nestr.io/n/abc".to_string())
         );
         // A trailing slash on the host must not double up.
         assert_eq!(
-            nest_url("https://app.nestr.io/", None, "abc"),
+            nest_url("https://app.nestr.io/", None, "abc", &[]),
             Some("https://app.nestr.io/n/abc".to_string())
         );
         // A known parent context yields HOST/n/{parentId}/{id} (opens in context).
         assert_eq!(
-            nest_url("https://app.nestr.io", Some("p1"), "abc"),
+            nest_url("https://app.nestr.io", Some("p1"), "abc", &[]),
             Some("https://app.nestr.io/n/p1/abc".to_string())
         );
         // An empty parent is ignored, not interpolated as `/n//abc`.
         assert_eq!(
-            nest_url("https://app.nestr.io", Some(""), "abc"),
+            nest_url("https://app.nestr.io", Some(""), "abc", &[]),
             Some("https://app.nestr.io/n/abc".to_string())
         );
         // No id → no link.
-        assert_eq!(nest_url("https://app.nestr.io", None, ""), None);
+        assert_eq!(nest_url("https://app.nestr.io", None, "", &[]), None);
+    }
+
+    #[test]
+    fn nest_url_carries_the_containing_tab_in_the_two_id_form() {
+        let labels = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            nest_url(
+                "https://app.nestr.io",
+                Some("c1"),
+                "p1",
+                &labels(&["project", "userstory"])
+            ),
+            Some("https://app.nestr.io/n/c1/p1#projects".to_string())
+        );
+        assert_eq!(
+            nest_url("https://app.nestr.io", Some("c1"), "r1", &labels(&["role"])),
+            Some("https://app.nestr.io/n/c1/r1#roles".to_string())
+        );
+        // Unmapped label: no guess.
+        assert_eq!(
+            nest_url(
+                "https://app.nestr.io",
+                Some("c1"),
+                "x",
+                &labels(&["custom"])
+            ),
+            Some("https://app.nestr.io/n/c1/x".to_string())
+        );
+        // The bare form never gets a hash: it would select a tab on the nest itself.
+        assert_eq!(
+            nest_url("https://app.nestr.io", None, "p1", &labels(&["project"])),
+            Some("https://app.nestr.io/n/p1".to_string())
+        );
+        // Inbox is not a container you can open in the left pane.
+        assert_eq!(
+            nest_url(
+                "https://app.nestr.io",
+                Some("inbox"),
+                "i1",
+                &labels(&["task"])
+            ),
+            Some("https://app.nestr.io/n/i1".to_string())
+        );
     }
 
     #[test]
@@ -915,6 +1002,12 @@ mod tests {
         let a: AppView =
             serde_json::from_value(json!({"_id":"okr","title":"OKR","enabled":true})).unwrap();
         assert!(app_table(&[a]).contains("OKR"));
+        let paid: AppView = serde_json::from_value(
+            json!({"_id":"goals","title":"Goals","enabled":true,"paid":true,"plans":["plan_pro"],"category":"app"}),
+        )
+        .unwrap();
+        let out = app_table(&[paid]);
+        assert!(out.contains("paid") && out.contains("app"), "{out}");
     }
 
     #[test]

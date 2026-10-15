@@ -49,6 +49,7 @@ pub async fn resolve_client(g: &GlobalArgs) -> Result<(ResolvedConfig, NestrClie
         g.output,
     )
     .await?;
-    let client = NestrClient::with_refresh(cfg.api_base.clone(), &cfg.bearer, cfg.refresh.clone())?;
+    let client = NestrClient::with_refresh(cfg.api_base.clone(), &cfg.bearer, cfg.refresh.clone())?
+        .print_notices(cfg.output);
     Ok((cfg, client))
 }
