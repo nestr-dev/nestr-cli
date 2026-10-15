@@ -89,7 +89,8 @@ async fn nest_get_sends_the_hint_level_and_filters() {
         .and(query_param("hintTypes", "stale_work"))
         .and(query_param("minSeverity", "suggestion"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "status": "success", "data": {"_id": "n1", "title": "x", "hints": []}
+            "status": "success",
+            "data": {"_id": "n1", "title": "x", "hints": [{"type": "stale_work", "label": "stale"}]}
         })))
         .expect(1)
         .mount(&server)
@@ -104,6 +105,9 @@ async fn nest_get_sends_the_hint_level_and_filters() {
     let params: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let data = nests::fetch_get(&client, "n1", &params).await.unwrap();
     assert_eq!(data["_id"], "n1");
+    // A nest's own hints are rendered with the nest; only envelope-level hints are
+    // notices, so they don't print twice.
+    assert!(client.notices().is_empty());
 }
 
 #[test]
