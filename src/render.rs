@@ -7,7 +7,7 @@ use crate::config::OutputFormat;
 use crate::views::{
     AgentModeView, AgentReachView, AgentView, AppView, ChangeView, ChildView, CompactNest,
     ConnectionView, ConnectorTemplateView, ConnectorView, GroupView, InsightView, LinkView,
-    PartView, RoleView, StatusView, TensionView, UserView, WebhookView,
+    OccurrenceView, PartView, RoleView, StatusView, TensionView, UserView, WebhookView,
 };
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
@@ -102,6 +102,69 @@ pub fn output_nests(
     Ok(())
 }
 
+/// Text for one page of a series' occurrences: the series it belongs to, a table
+/// keyed by INSTANT (what `skip` and `edit` take), and how to get the next page.
+/// START is what the occurrence prints, which differs from its instant once moved.
+pub fn occurrences_text(page: &Value) -> String {
+    let series_id = page.get("seriesId").and_then(Value::as_str);
+    let Some(series_id) = series_id else {
+        return "This nest has no recurrence rule, so it has no occurrences. Set one with `nestr nests recurrence set <id> <RRULE>`.".yellow().to_string();
+    };
+    let mut out = Vec::new();
+    let title = page
+        .pointer("/series/title")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let all_day = if page.get("allDay").and_then(Value::as_bool) == Some(true) {
+        " · all-day"
+    } else {
+        ""
+    };
+    out.push(clean_text(&format!("Series {series_id}  {title}{all_day}")));
+    let rows: Vec<OccurrenceView> = page
+        .get("occurrences")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    if rows.is_empty() {
+        out.push("No occurrences on this page.".yellow().to_string());
+    } else {
+        let rows = rows
+            .iter()
+            .map(|o| {
+                vec![
+                    o.instant.map(|i| i.to_string()).unwrap_or_default(),
+                    o.start.clone().unwrap_or_default(),
+                    o.title.clone(),
+                    o.state(),
+                    o.nest_id.clone().unwrap_or_default(),
+                ]
+            })
+            .collect();
+        out.push(format_table(
+            &["INSTANT", "START", "TITLE", "STATE", "NEST"],
+            rows,
+        ));
+    }
+    let has_more = page.get("hasMore").and_then(Value::as_bool) == Some(true);
+    if page.get("truncated").and_then(Value::as_bool) == Some(true) {
+        out.push(
+            "The server stopped walking the rule here; asking again from this cursor returns the same page."
+                .dimmed()
+                .to_string(),
+        );
+    } else if has_more {
+        if let Some(next) = page.get("nextCursorMs").and_then(Value::as_i64) {
+            out.push(
+                format!("more: rerun with --cursor {next} (keep --past/--limit as they were)")
+                    .dimmed()
+                    .to_string(),
+            );
+        }
+    }
+    out.join("\n")
+}
+
 /// The canonical web permalink for a nest: `{host}/n/{id}`, or
 /// `{host}/n/{parentId}/{id}#{tab}` when a parent context is known (opens the nest in
 /// context). The path segment is `/n/` — never `/nest/`, `/nests/`, or a `#/`
@@ -172,8 +235,14 @@ pub fn output_nest_detail(data: &Value, host: &str, output: OutputFormat) -> Res
             if !n.labels.is_empty() {
                 println!("labels: {}", clean_text(&n.labels_str()));
             }
+            if let Some(s) = &n.start {
+                println!("start: {s}");
+            }
             if let Some(d) = &n.due {
                 println!("due: {d}");
+            }
+            if n.all_day == Some(true) {
+                println!("all-day: true");
             }
             if let Some(c) = n.completed {
                 println!("completed: {c}");

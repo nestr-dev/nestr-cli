@@ -16,6 +16,7 @@ pub mod nests;
 pub mod notifications;
 pub mod plan;
 pub mod projects;
+pub mod recurrence;
 pub mod roles;
 pub mod search;
 pub mod tensions;

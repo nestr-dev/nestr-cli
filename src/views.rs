@@ -21,6 +21,10 @@ pub struct CompactNest {
     pub labels: Vec<Value>,
     #[serde(default)]
     pub due: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default, rename = "allDay")]
+    pub all_day: Option<bool>,
     #[serde(default, rename = "parentId")]
     pub parent_id: Option<String>,
 }
@@ -502,6 +506,46 @@ pub struct InsightView {
     pub goal: Option<String>,
 }
 
+/// One occurrence of a recurring series, virtual or materialized
+/// (`GET nests/:id/recurrence`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OccurrenceView {
+    #[serde(default)]
+    pub instant: Option<i64>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub completed: bool,
+    #[serde(default)]
+    pub r#virtual: bool,
+    #[serde(default, rename = "nestId")]
+    pub nest_id: Option<String>,
+    #[serde(default)]
+    pub excluded: bool,
+    #[serde(default)]
+    pub altered: bool,
+}
+
+impl OccurrenceView {
+    /// What this occurrence is, spelled out: a caller that ignores `excluded`
+    /// renders a meeting somebody cancelled.
+    pub fn state(&self) -> String {
+        if self.excluded {
+            return "skipped".into();
+        }
+        let mut parts: Vec<&str> = vec![if self.r#virtual { "virtual" } else { "nest" }];
+        if self.altered {
+            parts.push("altered");
+        }
+        if self.completed {
+            parts.push("done");
+        }
+        parts.join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,6 +559,16 @@ mod tests {
         assert_eq!(n.title, "T");
         assert!(n.due.is_none());
         assert_eq!(n.labels_str(), "");
+    }
+
+    #[test]
+    fn compact_nest_reads_the_schedule() {
+        let n: CompactNest = serde_json::from_value(json!({
+            "start":"2026-10-05T00:00:00.000Z","due":"2026-10-09T00:00:00.000Z","allDay":true
+        }))
+        .unwrap();
+        assert_eq!(n.start.as_deref(), Some("2026-10-05T00:00:00.000Z"));
+        assert_eq!(n.all_day, Some(true));
     }
 
     #[test]

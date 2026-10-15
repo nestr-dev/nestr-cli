@@ -171,6 +171,15 @@ impl NestrClient {
         self.request(Method::DELETE, path, &[], None).await
     }
 
+    /// DELETE with query params (e.g. `scope=following` on an occurrence).
+    pub async fn delete_with_params<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        params: &[(&str, &str)],
+    ) -> Result<T> {
+        self.request(Method::DELETE, path, params, None).await
+    }
+
     /// DELETE with a JSON body (e.g. propose-delete sends `{_id}`).
     pub async fn delete_body<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
         self.request(Method::DELETE, path, &[], Some(body)).await
