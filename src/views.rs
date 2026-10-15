@@ -506,6 +506,46 @@ pub struct InsightView {
     pub goal: Option<String>,
 }
 
+/// One occurrence of a recurring series, virtual or materialized
+/// (`GET nests/:id/recurrence`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OccurrenceView {
+    #[serde(default)]
+    pub instant: Option<i64>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub completed: bool,
+    #[serde(default)]
+    pub r#virtual: bool,
+    #[serde(default, rename = "nestId")]
+    pub nest_id: Option<String>,
+    #[serde(default)]
+    pub excluded: bool,
+    #[serde(default)]
+    pub altered: bool,
+}
+
+impl OccurrenceView {
+    /// What this occurrence is, spelled out: a caller that ignores `excluded`
+    /// renders a meeting somebody cancelled.
+    pub fn state(&self) -> String {
+        if self.excluded {
+            return "skipped".into();
+        }
+        let mut parts: Vec<&str> = vec![if self.r#virtual { "virtual" } else { "nest" }];
+        if self.altered {
+            parts.push("altered");
+        }
+        if self.completed {
+            parts.push("done");
+        }
+        parts.join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

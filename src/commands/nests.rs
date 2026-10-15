@@ -163,6 +163,11 @@ pub enum NestsCmd {
         #[command(subcommand)]
         cmd: LabelCmd,
     },
+    /// Make a nest repeat, and list, skip, edit or delete its occurrences.
+    Recurrence {
+        #[command(subcommand)]
+        cmd: crate::commands::recurrence::RecurrenceCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -441,6 +446,9 @@ pub async fn ensure_prime_compatible(client: &NestrClient, id: &str, label_id: &
 }
 
 pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
+    if let NestsCmd::Recurrence { cmd } = cmd {
+        return crate::commands::recurrence::run(cmd, g).await;
+    }
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
         NestsCmd::Get {
@@ -594,6 +602,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             };
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
+        NestsCmd::Recurrence { .. } => unreachable!("dispatched above"),
     }
     Ok(())
 }
