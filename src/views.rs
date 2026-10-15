@@ -726,3 +726,43 @@ mod tests {
         assert_eq!(s.responses[0].user_id.as_deref(), Some("u1"));
     }
 }
+
+/// A direct-message or queue thread. The listings name the id `id`; a single thread
+/// comes back as a nest, which names it `_id`, so one view reads both.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DmThreadView {
+    #[serde(default, alias = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub users: Vec<String>,
+    #[serde(default)]
+    pub ques: Vec<String>,
+    // A nest's `completed` can be a bool or a date, so read it loosely.
+    #[serde(default)]
+    pub completed: Option<Value>,
+    #[serde(default, rename = "lastPostAt")]
+    pub last_post_at: Option<String>,
+}
+
+impl DmThreadView {
+    pub fn is_closed(&self) -> bool {
+        match &self.completed {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+            Some(_) => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct QueueView {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default, rename = "workspaceId")]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub subscribed: bool,
+}

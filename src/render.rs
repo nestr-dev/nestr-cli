@@ -1172,6 +1172,79 @@ pub fn connect_link(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// Direct-message threads. `show_status` adds an open/closed column, for listings
+/// that can mix the two (`dm list --include-closed`).
+pub fn dm_thread_table(threads: &[crate::views::DmThreadView], show_status: bool) -> String {
+    let rows: Vec<Vec<String>> = threads
+        .iter()
+        .map(|t| {
+            let mut row = vec![
+                t.id.clone(),
+                t.title.clone().unwrap_or_default(),
+                t.users.join(", "),
+                t.ques.join(", "),
+                t.last_post_at.clone().unwrap_or_default(),
+            ];
+            if show_status {
+                row.push(if t.is_closed() { "closed" } else { "open" }.to_string());
+            }
+            row
+        })
+        .collect();
+    let mut headers = vec!["ID", "TITLE", "USERS", "QUEUES", "LAST POST"];
+    if show_status {
+        headers.push("STATUS");
+    }
+    format_table(&headers, rows)
+}
+
+/// Queue threads. The queue listing carries no participants, so no USERS column.
+pub fn queue_thread_table(threads: &[crate::views::DmThreadView]) -> String {
+    let rows: Vec<Vec<String>> = threads
+        .iter()
+        .map(|t| {
+            vec![
+                t.id.clone(),
+                t.title.clone().unwrap_or_default(),
+                t.ques.join(", "),
+                t.last_post_at.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "TITLE", "QUEUES", "LAST POST"], rows)
+}
+
+pub fn queue_table(queues: &[crate::views::QueueView]) -> String {
+    let rows: Vec<Vec<String>> = queues
+        .iter()
+        .map(|q| {
+            vec![
+                q.key.clone(),
+                q.title.clone().unwrap_or_default(),
+                if q.subscribed { "yes" } else { "no" }.to_string(),
+                q.workspace_id.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["KEY", "TITLE", "SUBSCRIBED", "WORKSPACE"], rows)
+}
+
+/// Posts (comments or direct messages), oldest first as the API returns them.
+pub fn post_table(posts: &[crate::views::PostView]) -> String {
+    let rows: Vec<Vec<String>> = posts
+        .iter()
+        .map(|p| {
+            vec![
+                p.id.clone(),
+                p.created_by.clone().unwrap_or_default(),
+                p.text(),
+                p.created_at.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+    format_table(&["ID", "BY", "BODY", "AT"], rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

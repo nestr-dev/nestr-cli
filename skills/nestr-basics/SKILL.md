@@ -1,6 +1,6 @@
 ---
 name: nestr-basics
-description: Use when working with Nestr from the terminal — searching and reading nests, creating projects and subtasks, capturing to the inbox, planning the day, posting comments and updates, and checking notifications and your open work. The everyday `nestr` CLI loop for an individual contributor.
+description: Use when working with Nestr from the terminal — searching and reading nests, creating projects and subtasks, capturing to the inbox, planning the day, posting comments and updates, direct messages and support queues, and checking notifications and your open work. The everyday `nestr` CLI loop for an individual contributor.
 ---
 
 # Nestr Basics
@@ -108,6 +108,7 @@ nestr comments add <nestId> "## Status
 - API **done**, deploying Friday
 - blocked on auth review — see [the PR](https://example.com/pr/1)"            # markdown renders
 nestr comments list <nestId>                                                  # read the thread
+nestr comments list <nestId> --unread                                         # only what you have not read
 ```
 
 Comment bodies (and `--description` / `--purpose`) render as **Markdown** in the web app
@@ -126,6 +127,41 @@ sanitizer runs before Markdown). Write `&lt;id&gt;` for a literal `<id>`, or rep
 ```bash
 nestr notifications list                 # unread notifications
 nestr notifications read                 # mark all read
+nestr dm list --unread                   # conversations with something new
+nestr queues threads support --unread    # support threads that have moved
+```
+
+## Direct messages & support queues
+
+A direct-message **thread** is addressed by its id everywhere; there is no container to
+look up first. These commands need an OAuth login (`nestr auth login`), not an API key.
+
+```bash
+nestr dm list                            # open threads, most recently posted first
+nestr dm list --with <user> --include-closed   # one person's threads, closed ones too
+nestr dm start <user> --title "Budget"   # new thread (user id, username or email)
+nestr dm show <threadId> --unread        # the thread plus the posts you have not read
+nestr dm posts <threadId>                # every post, oldest first
+nestr dm post <threadId> "On it, back by Friday"
+nestr dm mark-read <postId>              # read up to this post (works for any post)
+nestr dm close <threadId>                # done: drops out of `dm list`, still readable
+nestr dm reopen <threadId>
+nestr dm update <threadId> --title "Q4 budget"
+nestr dm update <threadId> --users <me>,<them>,<colleague>   # replaces the participant list
+```
+
+`dm update --users` sets the **whole** participant list, so read it with `dm show` first and
+send it back with someone added or removed; send it without yourself to leave. It asks for
+confirmation (`--yes` in scripts and agents).
+
+A support queue is a label on DM threads. If you monitor the queue you see every thread in
+it; otherwise only the ones you raised, which is how you find your own open tickets. Read
+a queue thread with `nestr dm show <threadId>`.
+
+```bash
+nestr queues list                        # queues you monitor or have a thread in
+nestr queues threads support             # threads in the `support` queue
+nestr queues threads support --read      # only the ones you have already read
 nestr work                               # your open projects + todos
 nestr projects list                      # every project in the workspace
 ```
