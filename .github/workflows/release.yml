@@ -2,21 +2,15 @@ name: Release
 
 # Release with scripts/release.sh: it merges the version bump through a PR and
 # then pushes the v* tag on the merge commit, which triggers this workflow.
-# workflow_dispatch rebuilds an existing tag on main without signing, publishing
-# or updating Homebrew (those steps only run on a tag push).
+# A v* tag push is the only trigger. To retry a failed release, use "Re-run
+# jobs" on that tag's run.
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing release tag on main to rebuild (e.g., v0.1.0)"
-        required: true
-        type: string
 
 env:
   CARGO_TERM_COLOR: always
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ github.ref_name }}
 
 jobs:
   verify-version:
@@ -29,13 +23,6 @@ jobs:
     outputs:
       sha: ${{ steps.on-main.outputs.sha }}
     steps:
-      - name: Check tag format
-        run: |
-          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::'$RELEASE_TAG' is not a vX.Y.Z tag."
-            exit 1
-          fi
-
       # Full history, so the ancestry check below sees all of main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -171,18 +158,15 @@ jobs:
           cat checksums-sha256.txt
 
       - name: Install cosign
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign checksums
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           cosign sign-blob --yes \
             --bundle artifacts/checksums-sha256.txt.sigstore.json \
             artifacts/checksums-sha256.txt
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -197,7 +181,6 @@ jobs:
   homebrew:
     name: Update Homebrew tap
     needs: [verify-version, release]
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: release
     permissions:

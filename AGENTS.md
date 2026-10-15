@@ -114,10 +114,10 @@ early (a failed required check, a timeout), finish once the PR merges with
 whose commit isn't on `main` or doesn't equal `Cargo.toml`'s `version`. It builds 5
 targets, publishes SHA-256 checksums + a keyless cosign signature + a CycloneDX SBOM,
 then updates the Homebrew formula in `nestr-dev/homebrew-tap` (the `homebrew` job,
-`environment: release`, which holds `HOMEBREW_TAP_TOKEN`). `workflow_dispatch`
-rebuilds an existing tag without publishing. `install.sh` is the artifact-naming
-contract — rename an archive in one, change the other. crates.io, nix, and shell
-completions are intentionally **not** wired up.
+`environment: release`, which holds `HOMEBREW_TAP_TOKEN`). A tag push is the only
+trigger. To retry a failed release, use **Re-run jobs** on that tag's run in Actions.
+`install.sh` is the artifact-naming contract — rename an archive in one, change the
+other. crates.io, nix, and shell completions are intentionally **not** wired up.
 
 ## Specs
 
