@@ -336,6 +336,155 @@ pub struct WebhookView {
     pub error_count: Option<u64>,
 }
 
+/// An agent (bot user) in the workspace.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AgentView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub profile: Option<Value>,
+    /// Set on an assistant: an agent that can never fill a role.
+    #[serde(default)]
+    pub assistant: Option<bool>,
+}
+
+impl AgentView {
+    pub fn name(&self) -> String {
+        self.profile
+            .as_ref()
+            .and_then(|p| p.get("fullName"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    pub fn kind(&self) -> &'static str {
+        if self.assistant == Some(true) {
+            "assistant"
+        } else {
+            "agent"
+        }
+    }
+}
+
+/// One agent's operating mode on one nest.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AgentModeView {
+    #[serde(default, rename = "agentUserId")]
+    pub agent_user_id: String,
+    #[serde(default, rename = "nestId")]
+    pub nest_id: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub recheck: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub tzid: Option<String>,
+    #[serde(default, rename = "nextRunAt")]
+    pub next_run_at: Option<String>,
+    /// own, inherited or default. Absent on a set.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Set when a nest's own setting was cleared.
+    #[serde(default)]
+    pub cleared: Option<bool>,
+}
+
+/// A connector catalog entry. Holds no secret.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConnectorView {
+    #[serde(default, rename = "_id")]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, rename = "type")]
+    pub type_: Option<String>,
+    #[serde(default, rename = "authStrategy")]
+    pub auth_strategy: Option<String>,
+    #[serde(default)]
+    pub config: Option<Value>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+impl ConnectorView {
+    /// The endpoint url (mcp/api) or command (cli).
+    pub fn target(&self) -> String {
+        let cfg = self.config.as_ref();
+        cfg.and_then(|c| c.get("url"))
+            .or_else(|| cfg.and_then(|c| c.get("command")))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+}
+
+/// A connector template this deployment can add in one click.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConnectorTemplateView {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default, rename = "type")]
+    pub type_: Option<String>,
+    #[serde(default)]
+    pub blurb: Option<String>,
+}
+
+/// A binding as the workspace connections listing reports it. Holds no secret.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConnectionView {
+    #[serde(default, rename = "connectionId")]
+    pub id: String,
+    #[serde(default, rename = "connectorName")]
+    pub connector_name: String,
+    #[serde(default)]
+    pub owner: Option<Value>,
+    #[serde(default, rename = "ownerLabel")]
+    pub owner_label: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "connectedCount")]
+    pub connected_count: Option<u64>,
+}
+
+impl ConnectionView {
+    pub fn owner_type(&self) -> String {
+        self.owner
+            .as_ref()
+            .and_then(|o| o.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+}
+
+/// What an agent can use through one binding, and why not when it can't.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AgentReachView {
+    #[serde(default, rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(default, rename = "connectorName")]
+    pub connector_name: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub available: Option<bool>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default, rename = "roleTitle")]
+    pub role_title: Option<String>,
+    #[serde(default, rename = "domainTitle")]
+    pub domain_title: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
 /// An organizational-health metric (insight).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct InsightView {
@@ -453,6 +602,40 @@ mod tests {
         assert_eq!(l.id, "n1");
         assert_eq!(l.relation.as_deref(), Some("meeting"));
         assert_eq!(l.direction.as_deref(), Some("outgoing"));
+    }
+
+    #[test]
+    fn agent_view_reads_name_and_kind() {
+        let a: AgentView = serde_json::from_value(json!({
+            "_id":"a1","profile":{"fullName":"Collab"},"bot":true,"assistant":true
+        }))
+        .unwrap();
+        assert_eq!(a.name(), "Collab");
+        assert_eq!(a.kind(), "assistant");
+        let bare: AgentView = serde_json::from_value(json!({"_id":"a2"})).unwrap();
+        assert_eq!(bare.name(), "");
+        assert_eq!(bare.kind(), "agent");
+    }
+
+    #[test]
+    fn connector_view_target_is_url_or_command() {
+        let mcp: ConnectorView =
+            serde_json::from_value(json!({"_id":"k1","config":{"url":"https://mcp.test"}}))
+                .unwrap();
+        assert_eq!(mcp.target(), "https://mcp.test");
+        let cli: ConnectorView =
+            serde_json::from_value(json!({"_id":"k2","config":{"command":"gh"}})).unwrap();
+        assert_eq!(cli.target(), "gh");
+    }
+
+    #[test]
+    fn connection_view_reads_owner_type() {
+        let c: ConnectionView = serde_json::from_value(json!({
+            "connectionId":"c1","connectorName":"Xero","owner":{"type":"role-domain","id":"d1"}
+        }))
+        .unwrap();
+        assert_eq!(c.id, "c1");
+        assert_eq!(c.owner_type(), "role-domain");
     }
 
     #[test]

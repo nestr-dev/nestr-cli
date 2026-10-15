@@ -19,8 +19,8 @@ The same rule covers the work you cite as motivation. "A customer asked for read
 
 A Rust CLI (binary `nestr`, library crate `nestr_cli`) over the Nestr REST API — a
 fast, scriptable companion to the hosted Nestr MCP. Covers the everyday loop, org &
-people, governance tensions, graph links, insights, export, and webhooks. (The parked
-`agents` command group and `replaceNest` are intentionally not yet wired up.)
+people, governance tensions, graph links, insights, export, webhooks, and agents &
+connectors. (`replaceNest` is intentionally not yet wired up.)
 
 ## Dev loop
 

@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 
 use nestr_cli::commands::{
-    auth, circles, comments, export, groups, inbox, insights, labels, links, me, nests,
-    notifications, plan, profiles, projects, roles, search, tensions, users, webhooks, work,
-    workspaces,
+    agents, auth, circles, comments, connectors, export, groups, inbox, insights, labels, links,
+    me, nests, notifications, plan, profiles, projects, roles, search, tensions, users, webhooks,
+    work, workspaces,
 };
 use nestr_cli::config::OutputFormat;
 
@@ -49,7 +49,9 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mexport\x1b[0m     Dump governance/work as JSON
 
 \x1b[1m\x1b[4mIntegrations:\x1b[0m
-  \x1b[1mwebhooks\x1b[0m   List/create/delete workspace webhooks (admin)"
+  \x1b[1mwebhooks\x1b[0m   List/create/delete workspace webhooks (admin)
+  \x1b[1magents\x1b[0m     Create and run agents; set their mode on a nest
+  \x1b[1mconnectors\x1b[0m Connector catalog, bindings and connect links"
 )]
 struct Cli {
     /// Profile to use (overrides the default).
@@ -212,6 +214,16 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::webhooks::WebhooksCmd,
     },
+    /// Agents: create, run, and set how they operate on a nest.
+    Agents {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::agents::AgentsCmd,
+    },
+    /// Connectors: the catalog, its bindings, and connect links.
+    Connectors {
+        #[command(subcommand)]
+        cmd: nestr_cli::commands::connectors::ConnectorsCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -293,6 +305,8 @@ async fn run() -> anyhow::Result<()> {
         Commands::Insights { cmd } => insights::run(cmd, &g).await,
         Commands::Export { cmd } => export::run(cmd, &g).await,
         Commands::Webhooks { cmd } => webhooks::run(cmd, &g).await,
+        Commands::Agents { cmd } => agents::run(cmd, &g).await,
+        Commands::Connectors { cmd } => connectors::run(cmd, &g).await,
         Commands::Version => {
             println!("nestr {}", env!("CARGO_PKG_VERSION"));
             Ok(())

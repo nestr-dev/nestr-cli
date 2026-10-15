@@ -163,6 +163,10 @@ impl NestrClient {
         self.request(Method::PATCH, path, &[], Some(body)).await
     }
 
+    pub async fn put<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
+        self.request(Method::PUT, path, &[], Some(body)).await
+    }
+
     pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         self.request(Method::DELETE, path, &[], None).await
     }
