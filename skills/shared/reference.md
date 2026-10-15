@@ -30,6 +30,9 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 - `-o, --output text|json` — `text` (tables) or `json` (raw, for `jq`).
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).
 - `--read-only` — hard-block every write (also `NESTR_READ_ONLY=1`).
+  A read-only Nestr API key is refused server-side on every write; the CLI reports
+  that as `this API key is read-only` rather than a scope problem. Pair such a key
+  with `--read-only` to stop before the request is sent.
 
 ## Workspace context
 

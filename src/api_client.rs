@@ -34,6 +34,21 @@ pub fn unwrap_data(v: Value) -> (Value, Option<Value>, Option<Value>) {
     (v, None, None)
 }
 
+/// The API refuses every write from a read-only API key with one 403 message
+/// (`restivus.js`, the read-only gate). Recognise it so the error says what to do
+/// instead of suggesting the token or its scopes are wrong.
+fn read_only_key_error(body: &str) -> Option<NestrError> {
+    let msg = extract_error_detail(body)?;
+    msg.contains("API key is read-only").then(|| {
+        NestrError::Permission(
+            "this API key is read-only, so Nestr refused the write. Use a key without the \
+             read-only setting to make changes, or pass --read-only (NESTR_READ_ONLY=1) to have \
+             the CLI stop before attempting writes."
+                .into(),
+        )
+    })
+}
+
 /// Reject path traversal, query/fragment injection, and out-of-alphabet segments
 /// in an API request path. Every request flows through `request_text`, and IDs are
 /// interpolated into `path` by callers, so this single chokepoint stops a crafted
@@ -168,9 +183,15 @@ impl NestrClient {
         validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
         let resp = self.send(&method, &url, query, body).await?;
-        // On a 403 with a refresh context, refresh the token once and retry.
+        // On a 403 with a refresh context, refresh the token once and retry, unless
+        // the 403 is the read-only gate: a fresh token for the same key is just as
+        // read-only.
         let resp = match (resp.status(), &self.refresh) {
             (StatusCode::FORBIDDEN, Some(r)) => {
+                let denial = resp.text().await.unwrap_or_default();
+                if let Some(e) = read_only_key_error(&denial) {
+                    return Err(e);
+                }
                 let new_token = r
                     .perform()
                     .await
@@ -239,6 +260,11 @@ impl NestrClient {
         let body = resp.text().await.unwrap_or_default();
         let detail = extract_error_detail(&body);
         let msg = detail.unwrap_or_else(|| body.clone());
+        if status == StatusCode::FORBIDDEN {
+            if let Some(e) = read_only_key_error(&body) {
+                return Err(e);
+            }
+        }
         match status {
             // Nestr uses 403 for auth failures too (401 is not used).
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(NestrError::Permission(

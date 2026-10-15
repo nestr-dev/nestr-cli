@@ -79,6 +79,67 @@ async fn api_key_client_does_not_retry_on_403() {
     assert!(matches!(err, nestr_cli::error::NestrError::Permission(_)));
 }
 
+const READ_ONLY_DENIAL: &str =
+    "This API key is read-only. Use a key without the read-only setting to make changes.";
+
+#[tokio::test]
+async fn read_only_key_denial_gets_a_clear_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(serde_json::json!({"status":"error","message": READ_ONLY_DENIAL})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = NestrClient::new(server.uri(), "key").unwrap();
+    let err = client
+        .post::<serde_json::Value>("/nests", &serde_json::json!({"title":"T"}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("this API key is read-only"), "{err}");
+    assert!(err.contains("--read-only"), "{err}");
+    assert!(!err.contains("auth status"), "{err}");
+}
+
+#[tokio::test]
+async fn read_only_denial_does_not_trigger_a_token_refresh() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/nests"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(serde_json::json!({"status":"error","message": READ_ONLY_DENIAL})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let refresh = ReactiveRefresh::new(
+        format!("{}/oauth/token", server.uri()),
+        "client-1".into(),
+        "read-only-test-profile".into(),
+        CredentialStorage::File,
+        "old-refresh".into(),
+    );
+    let client = NestrClient::with_refresh(server.uri(), "tok", Some(refresh)).unwrap();
+    let err = client
+        .post::<serde_json::Value>("/nests", &serde_json::json!({"title":"T"}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("this API key is read-only"), "{err}");
+}
+
 /// Helper: write a minimal OAuth profile TOML so update_profile_oauth_tokens has a file to patch.
 fn save_oauth_profile(name: &str, host: &str) {
     use nestr_cli::config::{save_profile, AuthKind, Profile};
