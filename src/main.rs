@@ -154,15 +154,17 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::notifications::NotificationsCmd,
     },
-    /// Workspace and personal labels.
+    /// Direct messages: list, read, post, close.
     Dm {
         #[command(subcommand)]
         cmd: nestr_cli::commands::dm::DmCmd,
     },
+    /// Support queues and their threads.
     Queues {
         #[command(subcommand)]
         cmd: nestr_cli::commands::queues::QueuesCmd,
     },
+    /// Workspace and personal labels.
     Labels {
         #[command(subcommand)]
         cmd: nestr_cli::commands::labels::LabelsCmd,
