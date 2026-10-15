@@ -356,10 +356,12 @@ pub fn app_table(apps: &[AppView]) -> String {
                 a.id.clone(),
                 a.title.clone().unwrap_or_default(),
                 if a.enabled { "✓" } else { "" }.to_string(),
+                if a.paid == Some(true) { "paid" } else { "" }.to_string(),
+                a.category.clone().unwrap_or_default(),
             ]
         })
         .collect();
-    format_table(&["ID", "TITLE", "ENABLED"], rows)
+    format_table(&["ID", "TITLE", "ENABLED", "PLAN", "CATEGORY"], rows)
 }
 
 /// Compact table for tensions.

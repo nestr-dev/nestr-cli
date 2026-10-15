@@ -186,6 +186,12 @@ pub struct AppView {
     pub title: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    /// Needs a paid plan; an enabled paid app blocks a move to Personal.
+    #[serde(default)]
+    pub paid: Option<bool>,
+    /// `app` (Applications tab) or `integration` (Integrations tab).
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 /// Extract label identifiers (handles `["code"]` and `[{code|title|_id}]`), skipping
