@@ -10,5 +10,6 @@ a self-contained `SKILL.md`; reach for the one that matches your task.
 | [nestr-org](nestr-org/SKILL.md) | administering structure — workspaces, circles, roles, users, groups |
 | [nestr-insights](nestr-insights/SKILL.md) | graph links, insights/metrics, and JSON export |
 | [nestr-webhooks](nestr-webhooks/SKILL.md) | creating and managing workspace webhooks |
+| [nestr-agents](nestr-agents/SKILL.md) | agents and connectors — create, run, set a cadence, bind tools, connect accounts |
 
 Shared setup, global flags, and a full command map: [shared/reference.md](shared/reference.md).

@@ -45,3 +45,60 @@ fn notifications_type_rejects_unknown_value() {
         "expected a clap value error, got: {stderr}"
     );
 }
+
+#[test]
+fn agents_mode_set_autonomous_requires_recheck() {
+    let out = run(&[
+        "agents",
+        "mode",
+        "set",
+        "a1",
+        "--nest",
+        "n1",
+        "--mode",
+        "autonomous",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("--recheck"),
+        "expected a missing --recheck error, got: {stderr}"
+    );
+}
+
+#[test]
+fn connectors_register_template_conflicts_with_type() {
+    let out = run(&[
+        "connectors",
+        "register",
+        "--template",
+        "xero",
+        "--type",
+        "mcp",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("cannot be used with"),
+        "expected a clap conflict error, got: {stderr}"
+    );
+}
+
+#[test]
+fn connectors_bind_rejects_unknown_owner_type() {
+    let out = run(&[
+        "connectors",
+        "bind",
+        "k1",
+        "--owner-type",
+        "team",
+        "--owner",
+        "x",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("invalid value") || stderr.contains("possible values"),
+        "expected a clap value error, got: {stderr}"
+    );
+}

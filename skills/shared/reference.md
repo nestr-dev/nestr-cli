@@ -50,10 +50,11 @@ workspace-scoped command with no active workspace errors with guidance to run
 
 - **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
   `roles`, `users`, `groups`, `labels list`/`labels get`, `insights`, `export`,
-  `webhooks`, `workspaces apps`, `nests bulk-reorder`.
+  `webhooks`, `workspaces apps`, `nests bulk-reorder`, `connectors`, and `agents` (except
+  `agents mode`).
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
   `comments`, `inbox`, `plan`, `notifications`, `tensions`, `links`, `me`, `auth`,
-  `profiles`, `workspaces list`/`get`/`use`/`create`.
+  `profiles`, `workspaces list`/`get`/`use`/`create`, `agents mode`.
 
 **Search is workspace-scoped.** Results only come from the active workspace (or the
 `--in <nestId>` subtree) — there is no cross-workspace search endpoint. If a search
@@ -205,3 +206,5 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 | `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members | nestr-org |
 | `links`, `insights`, `export` | graph links, metrics, JSON dumps | nestr-insights |
 | `webhooks` | workspace event subscriptions | nestr-webhooks |
+| `agents` | create and run agents; reactive or autonomous mode per nest | nestr-agents |
+| `connectors` | connector catalog, bindings to roles, connect links | nestr-agents |

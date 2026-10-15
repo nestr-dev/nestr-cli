@@ -2,7 +2,7 @@
 
 A fast, composable command-line interface for [Nestr](https://nestr.io) — built for terminal users and AI agents.
 
-`nestr` puts the whole Nestr surface in your shell: auth & profiles, the everyday loop (search, nests, comments, inbox, plan, work), org & people, governance tensions, graph links, insights, export, and webhooks. Every command speaks `-o json` for piping to `jq`, honours `--read-only`, and runs non-interactively under `--yes` for scripts and agents.
+`nestr` puts the whole Nestr surface in your shell: auth & profiles, the everyday loop (search, nests, comments, inbox, plan, work), org & people, governance tensions, graph links, insights, export, webhooks, and agents & connectors. Every command speaks `-o json` for piping to `jq`, honours `--read-only`, and runs non-interactively under `--yes` for scripts and agents.
 
 ## Install
 
@@ -28,7 +28,7 @@ Teach your coding agent the Nestr workflows — install the bundled [skills](ski
 
 ```sh
 npx skills add nestr-dev/nestr-cli                          # choose skills interactively
-npx skills add nestr-dev/nestr-cli --all -a claude-code -y  # all five, into Claude Code
+npx skills add nestr-dev/nestr-cli --all -a claude-code -y  # all six, into Claude Code
 ```
 
 Powered by [`skills`](https://github.com/vercel-labs/skills) (works across 40+ agents). The skills drive the `nestr` CLI, so install it (above) too.
@@ -107,18 +107,20 @@ Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `
 | `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members |
 | `links`, `insights`, `export` | graph links, metrics, JSON dumps |
 | `webhooks` | workspace event subscriptions |
+| `agents`, `connectors` | run agents and set their cadence; connect outside tools to roles |
 
 Run `nestr <group> --help` for subcommands. A fuller command map with per-group notes lives in [`skills/shared/reference.md`](skills/shared/reference.md).
 
 ## Skills
 
-Five `SKILL.md` files under [`skills/`](skills/README.md) document the CLI for agents (and humans), authored as plain Markdown so the hosted Nestr MCP can consume them over time:
+Six `SKILL.md` files under [`skills/`](skills/README.md) document the CLI for agents (and humans), authored as plain Markdown so the hosted Nestr MCP can consume them over time:
 
 - **`nestr-basics`** — the everyday loop (search, nests, inbox, plan, comments).
 - **`nestr-governance`** — tensions: propose, review changes, consent, vote.
 - **`nestr-org`** — workspaces, circles, roles, users, groups.
 - **`nestr-insights`** — graph links, insights/metrics, and JSON export.
 - **`nestr-webhooks`** — workspace event subscriptions.
+- **`nestr-agents`** — agents, their mode and cadence, and connectors.
 
 Start at [`skills/README.md`](skills/README.md); shared setup and global flags are in [`skills/shared/reference.md`](skills/shared/reference.md).
 

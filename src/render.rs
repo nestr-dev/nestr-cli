@@ -5,8 +5,9 @@ use tabled::builder::Builder;
 
 use crate::config::OutputFormat;
 use crate::views::{
-    AppView, ChangeView, ChildView, CompactNest, GroupView, InsightView, LinkView, PartView,
-    RoleView, StatusView, TensionView, UserView, WebhookView,
+    AgentModeView, AgentReachView, AgentView, AppView, ChangeView, ChildView, CompactNest,
+    ConnectionView, ConnectorTemplateView, ConnectorView, GroupView, InsightView, LinkView,
+    PartView, RoleView, StatusView, TensionView, UserView, WebhookView,
 };
 
 pub fn format_json(rows: &[Value]) -> Result<String> {
@@ -808,6 +809,300 @@ pub fn webhook_detail(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+fn yes_no(b: Option<bool>) -> String {
+    match b {
+        Some(true) => "yes".into(),
+        Some(false) => "no".into(),
+        None => String::new(),
+    }
+}
+
+pub fn output_agents(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let agents: Vec<AgentView> = serde_json::from_value(data.clone()).unwrap_or_default();
+            if agents.is_empty() {
+                print_no_results("No agents.");
+                return Ok(());
+            }
+            let rows = agents
+                .iter()
+                .map(|a| vec![a.id.clone(), a.name(), a.kind().to_string()])
+                .collect();
+            println!("{}", format_table(&["ID", "NAME", "KIND"], rows));
+        }
+    }
+    Ok(())
+}
+
+pub fn agent_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let a: AgentView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", clean_text(&a.name()), a.id);
+            println!("kind: {}", a.kind());
+        }
+    }
+    Ok(())
+}
+
+pub fn agent_mode(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let m: AgentModeView = serde_json::from_value(data.clone()).unwrap_or_default();
+            if m.cleared == Some(true) {
+                println!("Cleared this nest's own mode; the agent inherits again.");
+                return Ok(());
+            }
+            let mode = clean_text(&m.mode.unwrap_or_default());
+            match &m.source {
+                Some(src) => println!("mode: {mode}  ({})", clean_text(src)),
+                None => println!("mode: {mode}"),
+            }
+            if let Some(r) = &m.recheck {
+                println!("recheck: {}", clean_text(r));
+            }
+            if let Some(s) = &m.start {
+                println!("start: {}", clean_text(s));
+            }
+            if let Some(t) = &m.tzid {
+                println!("time zone: {}", clean_text(t));
+            }
+            if let Some(n) = &m.next_run_at {
+                println!("next run: {}", clean_text(n));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn agent_run(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let nest = data.get("nestId").and_then(Value::as_str).unwrap_or("");
+            println!("Agent dispatched on {nest}.");
+            match data.get("watchUrl").and_then(Value::as_str) {
+                // URLs skip clean_text: its entity decoding would mangle `&…` query params.
+                Some(url) => println!("Watch it at {}", sanitize(url)),
+                None => println!("It reports back on the item it was run on."),
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn output_agent_reach(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let reach: Vec<AgentReachView> =
+                serde_json::from_value(data.clone()).unwrap_or_default();
+            if reach.is_empty() {
+                print_no_results("This agent can reach no connectors.");
+                return Ok(());
+            }
+            let rows = reach
+                .iter()
+                .map(|r| {
+                    let via = match (&r.role_title, &r.domain_title) {
+                        (Some(role), Some(domain)) => format!("{role} / {domain}"),
+                        (Some(role), None) => role.clone(),
+                        _ => String::new(),
+                    };
+                    vec![
+                        r.connector_name.clone(),
+                        yes_no(r.available),
+                        r.source.clone().unwrap_or_default(),
+                        via,
+                        r.reason.clone().unwrap_or_default(),
+                        r.connection_id.clone(),
+                    ]
+                })
+                .collect();
+            println!(
+                "{}",
+                format_table(
+                    &[
+                        "CONNECTOR",
+                        "AVAILABLE",
+                        "SOURCE",
+                        "VIA",
+                        "REASON",
+                        "CONNECTION"
+                    ],
+                    rows
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn output_connectors(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let connectors: Vec<ConnectorView> =
+                serde_json::from_value(data.clone()).unwrap_or_default();
+            if connectors.is_empty() {
+                print_no_results("No connectors.");
+                return Ok(());
+            }
+            let rows = connectors
+                .iter()
+                .map(|c| {
+                    vec![
+                        c.id.clone(),
+                        c.name.clone(),
+                        c.type_.clone().unwrap_or_default(),
+                        c.auth_strategy.clone().unwrap_or_default(),
+                        yes_no(c.enabled),
+                        c.target(),
+                    ]
+                })
+                .collect();
+            println!(
+                "{}",
+                format_table(&["ID", "NAME", "TYPE", "AUTH", "ENABLED", "TARGET"], rows)
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn connector_detail(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let c: ConnectorView = serde_json::from_value(data.clone()).unwrap_or_default();
+            println!("{}  [{}]", clean_text(&c.name), c.id);
+            println!(
+                "{} via {}",
+                clean_text(&c.type_.clone().unwrap_or_default()),
+                clean_text(&c.auth_strategy.clone().unwrap_or_default())
+            );
+            let target = c.target();
+            if !target.is_empty() {
+                println!("target: {}", clean_text(&target));
+            }
+            println!("enabled: {}", yes_no(c.enabled));
+        }
+    }
+    Ok(())
+}
+
+pub fn output_connector_templates(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let templates: Vec<ConnectorTemplateView> =
+                serde_json::from_value(data.clone()).unwrap_or_default();
+            if templates.is_empty() {
+                print_no_results("This deployment offers no connector templates.");
+                return Ok(());
+            }
+            let rows = templates
+                .iter()
+                .map(|t| {
+                    vec![
+                        t.id.clone(),
+                        t.name.clone(),
+                        t.type_.clone().unwrap_or_default(),
+                        t.category.clone().unwrap_or_default(),
+                        t.blurb.clone().unwrap_or_default(),
+                    ]
+                })
+                .collect();
+            println!(
+                "{}",
+                format_table(&["ID", "NAME", "TYPE", "CATEGORY", "ABOUT"], rows)
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn output_connections(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let conns: Vec<ConnectionView> =
+                serde_json::from_value(data.clone()).unwrap_or_default();
+            if conns.is_empty() {
+                print_no_results("No connections.");
+                return Ok(());
+            }
+            let rows = conns
+                .iter()
+                .map(|c| {
+                    vec![
+                        c.id.clone(),
+                        c.connector_name.clone(),
+                        c.owner_type(),
+                        c.owner_label.clone().unwrap_or_default(),
+                        c.status.clone().unwrap_or_default(),
+                        c.connected_count.unwrap_or(0).to_string(),
+                    ]
+                })
+                .collect();
+            println!(
+                "{}",
+                format_table(
+                    &[
+                        "ID",
+                        "CONNECTOR",
+                        "OWNER TYPE",
+                        "OWNER",
+                        "STATUS",
+                        "CONNECTED"
+                    ],
+                    rows
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The result of binding a connector: the new connection and, for a role owner,
+/// the domain that now holds the access.
+pub fn connection_bound(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let id = data.get("_id").and_then(Value::as_str).unwrap_or("");
+            println!("Connection created [{id}].");
+            if let Some(domain) = data.get("domainId").and_then(Value::as_str) {
+                let created = data.get("domainCreated").and_then(Value::as_bool) == Some(true);
+                let verb = if created { "created" } else { "found" };
+                println!("domain: {domain} ({verb})");
+            }
+            println!(
+                "Nobody can use it until an account is connected: run `nestr connectors connections link {id}` and give the link to a person to open."
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn connect_link(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let url = data.get("url").and_then(Value::as_str).unwrap_or("");
+            println!("{}", sanitize(url));
+            eprintln!(
+                "Give this link to a person to open. They sign in or enter the key there, so the secret never passes through the CLI."
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1085,6 +1380,14 @@ mod tests {
                 && out.contains("nest")
                 && out.contains("create")
         );
+    }
+
+    #[test]
+    fn sanitize_keeps_url_query_entities_intact() {
+        // Connect and watch links go through sanitize, not clean_text, whose
+        // entity decoding would turn `&notify` into `¬ify`.
+        let url = "https://app.test/n/ws?a=1&notify=x&copy=y";
+        assert_eq!(sanitize(url), url);
     }
 
     #[test]

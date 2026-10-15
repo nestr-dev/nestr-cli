@@ -2,8 +2,10 @@ pub mod auth;
 pub mod me;
 pub mod profiles;
 // Uncommented by later tasks as each module is created:
+pub mod agents;
 pub mod circles;
 pub mod comments;
+pub mod connectors;
 pub mod export;
 pub mod groups;
 pub mod inbox;
