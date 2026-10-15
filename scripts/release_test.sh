@@ -60,7 +60,8 @@ run_test() {
 #   auto_merge    value of allow_auto_merge (default true)
 #   polls         one `gh pr view` answer per line: a JSON object, FAIL (exit 1)
 #                 or MERGE (squash-merge the release branch and report MERGED).
-#                 The last line repeats once the others are used up.
+#                 The last line repeats once the others are used up. An answer's
+#                 "checks" list ({bucket, required}) is what `gh pr checks` sees.
 #   calls         every invocation, appended
 #   pr_body       the --body passed to `gh pr create`
 write_fake_gh() {
@@ -93,6 +94,7 @@ case "$1 ${2:-}" in
     total=$(wc -l <"$d/polls")
     line=$(sed -n "$((n < total ? n + 1 : total))p" "$d/polls")
     echo $((n + 1)) >"$d/poll_n"
+    printf '%s\n' "$line" >"$d/current"
     case "$line" in
       FAIL) echo "HTTP 502" >&2; exit 1 ;;
       MERGE)
@@ -106,10 +108,20 @@ case "$1 ${2:-}" in
           git -C "$m" rev-parse HEAD >"$d/merged_sha"
           rm -rf "$m"
         fi
-        line="{\"state\":\"MERGED\",\"reviewDecision\":\"APPROVED\",\"mergeCommit\":{\"oid\":\"$(cat "$d/merged_sha")\"},\"statusCheckRollup\":[]}"
+        line="{\"state\":\"MERGED\",\"reviewDecision\":\"APPROVED\",\"mergeCommit\":{\"oid\":\"$(cat "$d/merged_sha")\"}}"
+        printf '%s\n' "$line" >"$d/current"
         ;;
     esac
     echo "$line" | jq -r "$jq_filter"
+    ;;
+  "pr checks")
+    # Answers from the "checks" of the last pr view answer. Like gh, exits 1
+    # when a check failed and 8 while one is pending, after printing the JSON.
+    checks=$(jq -c '.checks // []' "$d/current")
+    [[ " $* " == *" --required "* ]] && checks=$(echo "$checks" | jq -c '[.[] | select(.required != false)]')
+    echo "$checks" | jq -r "$jq_filter"
+    echo "$checks" | jq -e 'any(.bucket == "fail")' >/dev/null && exit 1
+    echo "$checks" | jq -e 'any(.bucket == "pending")' >/dev/null && exit 8
     ;;
   *) echo "fake gh: unexpected call: $*" >&2; exit 64 ;;
 esac
@@ -127,7 +139,7 @@ setup_repo() {
   export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
   export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
   : >"$FAKE_GH_DIR/calls"
-  echo '{"state":"OPEN","reviewDecision":"","mergeCommit":null,"statusCheckRollup":[]}' >"$FAKE_GH_DIR/polls"
+  echo '{"state":"OPEN","reviewDecision":"","mergeCommit":null}' >"$FAKE_GH_DIR/polls"
 
   git init -q --bare -b main "$ORIGIN"
   git clone -q "$ORIGIN" "$t/repo" 2>/dev/null
@@ -288,9 +300,9 @@ test_dry_run_changes_nothing() {
 test_release_tags_the_merge_commit() {
   setup_repo happy
   cat >"$FAKE_GH_DIR/polls" <<'EOF'
-{"state":"OPEN","reviewDecision":"REVIEW_REQUIRED","mergeCommit":null,"statusCheckRollup":[{"conclusion":null,"state":null}]}
+{"state":"OPEN","reviewDecision":"REVIEW_REQUIRED","mergeCommit":null,"checks":[{"bucket":"pending"},{"bucket":"fail","required":false}]}
 FAIL
-{"state":"MERGED","reviewDecision":"APPROVED","mergeCommit":null,"statusCheckRollup":[]}
+{"state":"MERGED","reviewDecision":"APPROVED","mergeCommit":null}
 MERGE
 EOF
   local out merged
@@ -318,27 +330,21 @@ release_stops_on() {
   [ -z "$(git ls-remote --tags origin refs/tags/v0.3.4)" ] || fail "tagged anyway"
 }
 
-test_release_stops_on_failed_check() {
+test_release_stops_on_failed_required_check() {
   release_stops_on failedcheck \
-    '{"state":"OPEN","reviewDecision":"APPROVED","mergeCommit":null,"statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]}' \
-    "a check failed"
-}
-
-test_release_stops_on_failed_status_context() {
-  release_stops_on failedstatus \
-    '{"state":"OPEN","reviewDecision":"","mergeCommit":null,"statusCheckRollup":[{"state":"ERROR"}]}' \
-    "a check failed"
+    '{"state":"OPEN","reviewDecision":"APPROVED","mergeCommit":null,"checks":[{"bucket":"pending"},{"bucket":"fail"}]}' \
+    "a required check failed"
 }
 
 test_release_stops_on_requested_changes() {
   release_stops_on changes \
-    '{"state":"OPEN","reviewDecision":"CHANGES_REQUESTED","mergeCommit":null,"statusCheckRollup":[]}' \
+    '{"state":"OPEN","reviewDecision":"CHANGES_REQUESTED","mergeCommit":null}' \
     "changes were requested"
 }
 
 test_release_stops_on_closed_pr() {
   release_stops_on closed \
-    '{"state":"CLOSED","reviewDecision":"","mergeCommit":null,"statusCheckRollup":[]}' \
+    '{"state":"CLOSED","reviewDecision":"","mergeCommit":null}' \
     "closed without merging"
 }
 
@@ -349,7 +355,7 @@ test_release_gives_up_after_repeated_poll_failures() {
 test_release_times_out() {
   export WAIT_TIMEOUT_SECONDS=0
   release_stops_on timeout \
-    '{"state":"OPEN","reviewDecision":"REVIEW_REQUIRED","mergeCommit":null,"statusCheckRollup":[]}' \
+    '{"state":"OPEN","reviewDecision":"REVIEW_REQUIRED","mergeCommit":null}' \
     "timed out waiting"
 }
 

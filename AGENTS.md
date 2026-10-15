@@ -105,7 +105,7 @@ The script bumps `Cargo.toml` and `Cargo.lock`, opens a `release/vX.Y.Z` PR with
 changelog since the last tag, and arms squash auto-merge (the repo must allow
 auto-merge). The PR still needs an approving review from someone other than you. Once
 it merges, the script tags the merge commit and pushes the tag. If it stops early (a
-failed check, a timeout), it prints the tag command to finish by hand.
+failed required check, a timeout), it prints the tag command to finish by hand.
 `scripts/release_test.sh` tests it; CI runs that and ShellCheck.
 
 `.github/workflows/release.yml` runs on the `v*` tag. `verify-version` refuses a tag

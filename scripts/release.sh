@@ -11,8 +11,8 @@
 #      the new version is greater than the current one;
 #   2. bumps the version in Cargo.toml and Cargo.lock on a release/vX.Y.Z branch;
 #   3. opens a PR with a changelog since the last tag and arms squash auto-merge;
-#   4. waits for the PR to merge, stopping early on a failed check, requested
-#      changes or a closed PR;
+#   4. waits for the PR to merge, stopping early on a failed required check,
+#      requested changes or a closed PR;
 #   5. tags the squash commit that landed on main and pushes the tag, which
 #      triggers .github/workflows/release.yml.
 #
@@ -170,20 +170,26 @@ finish_hint() {
   echo "  git fetch origin main && git tag -a $1 -m $1 <merge-commit-sha> && git push origin $1" >&2
 }
 
+# required_failures PR_URL: how many required checks have failed, or nothing if
+# that can't be read right now. gh exits non-zero while checks are pending or
+# failing, so the count is read from stdout whatever the exit status.
+required_failures() {
+  local out
+  out=$(gh pr checks "$1" --required --json bucket --jq '[.[] | select(.bucket == "fail")] | length' 2>/dev/null) || true
+  if [[ "$out" =~ ^[0-9]+$ ]]; then echo "$out"; fi
+}
+
 # wait_for_merge PR_URL TAG: prints the merge commit SHA once the PR has merged.
 wait_for_merge() {
   local pr=$1 tag=$2 deadline failures=0 pr_status state decision merge_sha failed
   deadline=$((SECONDS + WAIT_TIMEOUT_SECONDS))
-  echo "Waiting for an approving review, green checks and the merge (timeout ${WAIT_TIMEOUT_SECONDS}s)..." >&2
+  echo "Waiting for an approving review, green required checks and the merge (timeout ${WAIT_TIMEOUT_SECONDS}s)..." >&2
   while true; do
     # Captured into a variable, not read from a process substitution: set -e
     # ignores a failure inside <(...), which left every field empty and spun the
     # loop silently. A failed poll is retried, but not forever.
-    if pr_status=$(gh pr view "$pr" \
-      --json state,reviewDecision,mergeCommit,statusCheckRollup \
-      --jq '[.state, (.reviewDecision // "" | if . == "" then "NONE" else . end), (.mergeCommit.oid // "-"),
-        ([.statusCheckRollup[]? | select((.conclusion // .state // "")
-          | IN("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"))] | length)] | @tsv'); then
+    if pr_status=$(gh pr view "$pr" --json state,reviewDecision,mergeCommit \
+      --jq '[.state, (.reviewDecision // "" | if . == "" then "NONE" else . end), (.mergeCommit.oid // "-")] | @tsv'); then
       failures=0
     else
       failures=$((failures + 1))
@@ -195,8 +201,8 @@ wait_for_merge() {
       fi
       pr_status=""
     fi
-    state="" decision="" merge_sha="" failed=""
-    IFS=$'\t' read -r state decision merge_sha failed <<<"$pr_status" || true
+    state="" decision="" merge_sha=""
+    IFS=$'\t' read -r state decision merge_sha <<<"$pr_status" || true
 
     # mergeCommit can lag behind state on the first poll after the merge.
     if [ "$state" = MERGED ] && [ -n "$merge_sha" ] && [ "$merge_sha" != - ]; then
@@ -211,8 +217,11 @@ wait_for_merge() {
       echo "Error: changes were requested on $pr. Nothing was tagged." >&2
       return 1
     fi
+    # Only required checks: GitHub merges past a failing optional one (such as
+    # the advisories audit), so the release should too.
+    failed=$(required_failures "$pr")
     if [ -n "$failed" ] && [ "$failed" != 0 ]; then
-      echo "Error: a check failed on $pr. Fix it there; auto-merge stays armed." >&2
+      echo "Error: a required check failed on $pr. Fix it there; auto-merge stays armed." >&2
       finish_hint "$tag"
       return 1
     fi
@@ -299,7 +308,7 @@ $notes"
     echo "  git commit -m '$title' Cargo.toml Cargo.lock && git push -u origin $branch"
     echo "  gh pr create --base main --head $branch --title '$title' --body <above>"
     echo "  gh pr merge <pr> --auto --squash"
-    echo "  (wait for an approving review, green checks and the merge)"
+    echo "  (wait for an approving review, green required checks and the merge)"
     echo "  git tag -a $tag -m $tag <merge-commit-sha> && git push origin $tag"
     echo
     echo "Dry run: nothing was changed. Next step: scripts/release.sh $spec"
@@ -332,7 +341,8 @@ $notes"
     die "Cargo.toml at $merge_sha is not $new. Nothing was tagged."
   git merge --ff-only origin/main
   git tag -a "$tag" -m "$tag" "$merge_sha"
-  git push origin "$tag"
+  git push origin "$tag" ||
+    die "could not push $tag. v* tags are protected by a ruleset; only users allowed to bypass it can push them. The bump is merged; ask one of them to run: git push origin $tag"
   git branch -D "$branch" >/dev/null 2>&1 || true
 
   echo "Released $tag at $merge_sha. The release workflow is building it now:"

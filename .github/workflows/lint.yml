@@ -46,10 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The tests run cargo against a fixture that pins the same toolchain.
+      # The tests run cargo against a fixture that copies rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.94.1"
+          components: rustfmt, clippy
       - name: ShellCheck
         run: shellcheck -x scripts/*.sh
       - name: Test
