@@ -364,7 +364,9 @@ pub fn output_roles(
 /// printed to a terminal. Keeps `\n` and `\t`; removes ESC, BEL, CSI/OSC bytes,
 /// bare CR, etc. Guards against OSC-52 clipboard writes, title spoofing, and
 /// cursor/erase tricks authored by other workspace members (SEC-1).
-fn sanitize(s: &str) -> String {
+/// Drop control characters (terminal escapes) but keep tabs and newlines, for
+/// multi-line bodies printed as-is.
+pub fn sanitize(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
         .collect()

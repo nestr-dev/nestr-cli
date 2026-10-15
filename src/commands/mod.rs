@@ -8,6 +8,7 @@ pub mod comments;
 pub mod connectors;
 pub mod dm;
 pub mod export;
+pub mod files;
 pub mod groups;
 pub mod inbox;
 pub mod insights;

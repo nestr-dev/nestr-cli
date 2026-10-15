@@ -158,6 +158,11 @@ pub enum NestsCmd {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
     },
+    /// Files attached to a nest (or a comment).
+    Files {
+        #[command(subcommand)]
+        cmd: crate::commands::files::FilesCmd,
+    },
     /// Add or remove a label on a nest.
     Label {
         #[command(subcommand)]
@@ -589,6 +594,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             let data = bulk_reorder(&client, cfg.require_workspace()?, &ids).await?;
             render::output_nests(&data, None, cfg.output, false)?;
         }
+        NestsCmd::Files { cmd } => crate::commands::files::run(cmd, &cfg, &client, g).await?,
         NestsCmd::Label { cmd } => {
             safety::enforce_read_only(g.read_only, "nests label")?;
             let data = match cmd {
