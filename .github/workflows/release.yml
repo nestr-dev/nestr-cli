@@ -103,9 +103,8 @@ jobs:
           toolchain: "1.94.1"
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: ${{ matrix.target }}
+      # No rust-cache: signed release binaries are built from a clean slate,
+      # never from a cache another run could have written.
 
       - name: Install cross
         if: matrix.cross
