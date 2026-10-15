@@ -68,12 +68,12 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.94.1"
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -104,7 +104,7 @@ jobs:
           Compress-Archive -Path "target/${{ matrix.target }}/release/nestr.exe" -DestinationPath "nestr-$version-${{ matrix.target }}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nestr-${{ matrix.target }}
           path: nestr-*
@@ -124,13 +124,13 @@ jobs:
         # required for the anchore/sbom-action workspace scan below
 
       - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           merge-multiple: true
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           format: cyclonedx-json
           output-file: artifacts/nestr-sbom.cyclonedx.json
@@ -154,7 +154,7 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
