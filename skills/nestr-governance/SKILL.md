@@ -35,9 +35,13 @@ nestr tensions create <circleId> --title "No one owns supplier relations" \
 
 ## Propose the change (parts)
 
-A tension holds **parts** — the concrete proposals:
+A tension holds **parts**: the work it asks for, or the governance change it proposes.
 
 ```bash
+# Ask for WORK (an operational output): no --label; --user does it, --role it is asked of
+nestr tensions parts add <circleId> <tensionId> --title "Draft the Q3 budget" \
+  --user <userId> --role <roleId>
+
 # Propose a NEW role/circle/policy
 nestr tensions parts add <circleId> <tensionId> --title "Supplier Steward" --label role \
   --purpose "Reliable supplier relationships" --accountability "Owning renewals"

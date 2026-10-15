@@ -86,14 +86,22 @@ pub enum TensionsCmd {
 pub enum PartsCmd {
     /// List proposal parts.
     List { nest_id: String, tension_id: String },
-    /// Propose a new role/circle/policy.
+    /// Add a part: a new role/circle/policy, or an operational output.
+    ///
+    /// With `--label role|circle|policy` the part proposes a new governance item. With
+    /// no label it is an operational output, the work the tension asks for: give
+    /// `--user` for who does it and `--role` for the role it is asked of.
     Add {
         nest_id: String,
         tension_id: String,
         #[arg(long)]
         title: String,
+        /// Governance item to propose. Omit for an operational output.
         #[arg(long, value_parser = ["role", "circle", "policy"])]
-        label: String,
+        label: Option<String>,
+        /// Role id the output is asked of (operational output).
+        #[arg(long)]
+        role: Option<String>,
         #[arg(long)]
         purpose: Option<String>,
         #[arg(long)]
@@ -122,6 +130,9 @@ pub enum PartsCmd {
         description: Option<String>,
         #[arg(long)]
         label: Option<String>,
+        /// Role id the output is asked of (operational output); "" clears it.
+        #[arg(long)]
+        role: Option<String>,
         #[arg(long)]
         parent: Option<String>,
         #[arg(long = "accountability")]
@@ -610,6 +621,7 @@ fn part_body(
     purpose: Option<String>,
     description: Option<String>,
     label: Option<String>,
+    role: Option<String>,
     parent: Option<String>,
     accountabilities: &[String],
     domains: &[String],
@@ -628,6 +640,9 @@ fn part_body(
     }
     if let Some(l) = label {
         body.insert("labels".into(), Value::Array(vec![l.into()]));
+    }
+    if let Some(r) = role {
+        body.insert("role".into(), r.into());
     }
     if let Some(p) = parent {
         body.insert("parentId".into(), p.into());
@@ -676,6 +691,7 @@ async fn run_parts(
             tension_id,
             title,
             label,
+            role,
             purpose,
             description,
             parent,
@@ -685,12 +701,15 @@ async fn run_parts(
             due,
         } => {
             safety::enforce_read_only(g.read_only, "tensions parts add")?;
-            validation::validate_prime_labels(std::slice::from_ref(&label))?;
+            if let Some(l) = &label {
+                validation::validate_prime_labels(std::slice::from_ref(l))?;
+            }
             let body = part_body(
                 Some(title),
                 purpose,
                 description,
-                Some(label),
+                label,
+                role,
                 parent,
                 &accountabilities,
                 &domains,
@@ -708,6 +727,7 @@ async fn run_parts(
             purpose,
             description,
             label,
+            role,
             parent,
             accountabilities,
             domains,
@@ -720,6 +740,7 @@ async fn run_parts(
                 purpose,
                 description,
                 label,
+                role,
                 parent,
                 &accountabilities,
                 &domains,
@@ -770,6 +791,7 @@ async fn run_parts(
                 purpose,
                 description,
                 label,
+                None,
                 parent,
                 &accountabilities,
                 &domains,
@@ -956,5 +978,25 @@ mod tests {
     fn vote_state_maps_decision() {
         assert_eq!(vote_state("accept"), "accepted");
         assert_eq!(vote_state("escalate"), "escalated");
+    }
+
+    #[test]
+    fn operational_output_part_sends_role_and_no_labels() {
+        let body = part_body(
+            Some("Draft the budget".into()),
+            None,
+            None,
+            None,
+            Some("r1".into()),
+            None,
+            &[],
+            &[],
+            &["u1".into()],
+            None,
+        );
+        assert_eq!(
+            Value::Object(body),
+            serde_json::json!({"title":"Draft the budget","role":"r1","users":["u1"]})
+        );
     }
 }

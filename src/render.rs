@@ -464,13 +464,14 @@ pub fn output_parts(data: &Value, output: OutputFormat) -> Result<()> {
                         .and_then(|i| i.get("labels"))
                         .and_then(|l| l.as_array())
                         .map(|a| crate::views::join_labels(a))
-                        .unwrap_or_default();
-                    vec![p.id.clone(), action, title, labels]
+                        .unwrap_or_else(|| crate::views::join_labels(&p.labels));
+                    let role = p.role.clone().unwrap_or_default();
+                    vec![p.id.clone(), action, title, labels, role]
                 })
                 .collect();
             println!(
                 "{}",
-                format_table(&["PART", "ACTION", "TITLE", "LABELS"], rows)
+                format_table(&["PART", "ACTION", "TITLE", "LABELS", "ROLE"], rows)
             );
         }
     }

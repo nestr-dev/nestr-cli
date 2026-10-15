@@ -239,6 +239,11 @@ pub struct PartView {
     pub title: Option<String>,
     #[serde(default)]
     pub items: Vec<Value>,
+    /// Operational outputs have no `items`: their labels and role sit on the part.
+    #[serde(default)]
+    pub labels: Vec<Value>,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// One line of a computed diff for a proposal part.
