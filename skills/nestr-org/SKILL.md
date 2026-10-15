@@ -78,6 +78,24 @@ nestr workspaces apps                     # show which apps are on
 nestr workspaces apps set insights on     # enable an app (okr | feedback | insights)
 ```
 
+## Reference documents
+
+A workspace can upload its own reference documents (a constitution, a staff handbook,
+an onboarding guide) for agents to draw on. Look at the index first, search them for
+the passage you need, and read a whole document only when you must: the large ones
+run past half a million characters.
+
+```bash
+nestr workspaces docs list                     # each document and what it holds
+nestr workspaces docs search "parental leave"  # matching passages, with offsets
+nestr workspaces docs read <fileId> --offset 4100   # read on from a search hit
+nestr workspaces docs read <fileId> --all      # the whole document
+```
+
+These are the organisation's own words about how it works; prefer them to general
+knowledge. An empty index is an answer (nothing was uploaded), and an empty search
+means "not found in the documents", not "the organisation has no position".
+
 ## Safety
 
 Admin writes (`circles`/`roles` `create`/`update`, `users add`/`update`,

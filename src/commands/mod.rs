@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod auth;
 pub mod me;
 pub mod profiles;
@@ -7,8 +8,11 @@ pub mod circles;
 pub mod comments;
 pub mod connectors;
 pub mod dm;
+pub mod docs;
 pub mod export;
+pub mod files;
 pub mod groups;
+pub mod hints;
 pub mod inbox;
 pub mod insights;
 pub mod labels;

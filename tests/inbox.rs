@@ -51,3 +51,21 @@ async fn reorder_sends_bare_array() {
         .unwrap();
     assert!(data.is_array());
 }
+
+#[tokio::test]
+async fn move_places_one_item_before_another() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/users/me/inbox/i1/reorder/before/i2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "success", "data": {"_id": "i1", "title": "x", "order": 3}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = inbox::move_item(&client, "i1", "before", "i2")
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "i1");
+}

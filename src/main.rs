@@ -176,6 +176,8 @@ enum Commands {
     },
     /// Your open work (projects + todos).
     Work,
+    /// Recent activity: yours, or another user's with --user.
+    Activity(nestr_cli::commands::activity::ActivityArgs),
     /// Workspaces and their apps.
     Workspaces {
         #[command(subcommand)]
@@ -211,6 +213,8 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::links::LinksCmd,
     },
+    /// Count hints (health signals) across a circle or the workspace.
+    Hints(nestr_cli::commands::hints::HintsArgs),
     /// Organizational-health insights (BETA).
     Insights {
         #[command(subcommand)]
@@ -309,6 +313,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Labels { cmd } => labels::run(cmd, &g).await,
         Commands::Projects { cmd } => projects::run(cmd, &g).await,
         Commands::Work => work::run(&g).await,
+        Commands::Activity(args) => nestr_cli::commands::activity::run(args, &g).await,
         Commands::Workspaces { cmd } => workspaces::run(cmd, &g).await,
         Commands::Circles { cmd } => circles::run(cmd, &g).await,
         Commands::Roles { cmd } => roles::run(cmd, &g).await,
@@ -316,6 +321,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Groups { cmd } => groups::run(cmd, &g).await,
         Commands::Tensions { cmd } => tensions::run(cmd, &g).await,
         Commands::Links { cmd } => links::run(cmd, &g).await,
+        Commands::Hints(args) => nestr_cli::commands::hints::run(args, &g).await,
         Commands::Insights { cmd } => insights::run(cmd, &g).await,
         Commands::Export { cmd } => export::run(cmd, &g).await,
         Commands::Webhooks { cmd } => webhooks::run(cmd, &g).await,

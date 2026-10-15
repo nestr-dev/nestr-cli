@@ -94,9 +94,7 @@ pub fn output_nests(
             if let Some(f) = pagination_footer(meta, supports_page) {
                 println!("{f}");
             }
-            if let Some(h) = hint_line(data) {
-                println!("{h}");
-            }
+            print_hints(data);
         }
     }
     Ok(())
@@ -251,9 +249,7 @@ pub fn output_nest_detail(data: &Value, host: &str, output: OutputFormat) -> Res
             if let Some(url) = nest_url(host, n.parent_id.as_deref(), &n.id, &labels) {
                 println!("url: {url}");
             }
-            if let Some(h) = hint_line(data) {
-                println!("{h}");
-            }
+            print_hints(data);
         }
     }
     Ok(())
@@ -319,6 +315,71 @@ pub fn hint_line(data: &Value) -> Option<String> {
     find(data).map(|u| format!("next: {}", clean_text(&u)).dimmed().to_string())
 }
 
+/// One nest's hints as `- [severity] label (type)` lines, each followed by the
+/// search that finds the other nests with the same problem, when it carries one.
+fn nest_hint_lines(nest: &Value, indent: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for h in nest
+        .get("hints")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let s = |k: &str| clean_text(h.get(k).and_then(Value::as_str).unwrap_or(""));
+        out.push(format!(
+            "{indent}- [{}] {} ({})",
+            s("severity"),
+            s("label"),
+            s("type")
+        ));
+        let q = h.get("query");
+        let search = q.and_then(|q| q.get("search")).and_then(Value::as_str);
+        let scope = q.and_then(|q| q.get("scope")).and_then(Value::as_str);
+        if let (Some(search), Some(scope)) = (search, scope) {
+            out.push(format!(
+                "{indent}    find the rest: nestr search \"{}\" --in {}",
+                clean_text(search).replace('"', "\\\""),
+                clean_text(scope)
+            ));
+        }
+    }
+    out
+}
+
+/// Text lines for the `hints` on a nest, or on each nest of a listing (grouped
+/// under the nest's title). Empty when nothing carries hints.
+pub fn hint_lines(data: &Value) -> Vec<String> {
+    match data {
+        Value::Array(nests) => nests
+            .iter()
+            .flat_map(|n| {
+                let lines = nest_hint_lines(n, "  ");
+                if lines.is_empty() {
+                    return lines;
+                }
+                let s = |k: &str| clean_text(n.get(k).and_then(Value::as_str).unwrap_or(""));
+                let mut out = vec![format!("{} [{}]", s("title"), s("_id"))];
+                out.extend(lines);
+                out
+            })
+            .collect(),
+        _ => nest_hint_lines(data, ""),
+    }
+}
+
+/// Print the hints block, or fall back to the single `next:` url line.
+fn print_hints(data: &Value) {
+    let lines = hint_lines(data);
+    if !lines.is_empty() {
+        println!("hints:");
+        for l in lines {
+            println!("{l}");
+        }
+    } else if let Some(h) = hint_line(data) {
+        println!("{h}");
+    }
+}
+
 /// Compact table for roles/circles. ACC/DOM are counts; full titles live in `role_detail`.
 pub fn role_table(roles: &[RoleView]) -> String {
     let rows: Vec<Vec<String>> = roles
@@ -364,7 +425,7 @@ pub fn output_roles(
 /// printed to a terminal. Keeps `\n` and `\t`; removes ESC, BEL, CSI/OSC bytes,
 /// bare CR, etc. Guards against OSC-52 clipboard writes, title spoofing, and
 /// cursor/erase tricks authored by other workspace members (SEC-1).
-fn sanitize(s: &str) -> String {
+pub fn sanitize(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
         .collect()

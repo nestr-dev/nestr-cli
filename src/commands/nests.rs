@@ -17,9 +17,28 @@ pub enum NestsCmd {
         /// Include field metadata.
         #[arg(long)]
         fields_meta: bool,
-        /// Include API next-step hints.
+        /// Include contextual hints: `--hints` (full) or `--hints=summary` (no teaching prose).
+        #[arg(long, value_name = "LEVEL", num_args = 0..=1, require_equals = true, default_missing_value = "full",
+              value_parser = HINT_LEVELS)]
+        hints: Option<String>,
+        /// Keep only these hint types (comma-separated). Needs --hints.
+        #[arg(long, value_delimiter = ',', requires = "hints")]
+        hint_types: Vec<String>,
+        /// Drop hints below this severity. Needs --hints.
+        #[arg(long, value_parser = SEVERITIES, requires = "hints")]
+        min_severity: Option<String>,
+        /// Single nest: which label and circle context defines each field and property.
         #[arg(long)]
-        hints: bool,
+        provenance: bool,
+        /// Single nest: your composed rights, with what blocks each operation and why.
+        #[arg(long)]
+        rights: bool,
+        /// With --rights, compose them for this user id instead (needs nest admin).
+        #[arg(long, value_name = "USER_ID", requires = "rights")]
+        for_user: Option<String>,
+        /// Single nest: who can perform these operations (comma-separated).
+        #[arg(long, value_delimiter = ',', value_parser = ["read", "update", "delete", "create"])]
+        who_can: Vec<String>,
     },
     /// List the direct children of a nest.
     Children {
@@ -33,6 +52,19 @@ pub enum NestsCmd {
         page: Option<u32>,
         #[arg(long)]
         clean_text: bool,
+        /// Sort order, e.g. `title`, `-createdAt`.
+        #[arg(long)]
+        sort: Option<String>,
+        /// Include per-child hints: `--hints` (summary) or `--hints=full`.
+        #[arg(long, value_name = "LEVEL", num_args = 0..=1, require_equals = true, default_missing_value = "summary",
+              value_parser = HINT_LEVELS)]
+        hints: Option<String>,
+        /// Keep only these hint types (comma-separated). Needs --hints.
+        #[arg(long, value_delimiter = ',', requires = "hints")]
+        hint_types: Vec<String>,
+        /// Drop hints below this severity. Needs --hints.
+        #[arg(long, value_parser = SEVERITIES, requires = "hints")]
+        min_severity: Option<String>,
     },
     /// Create a nest.
     Create {
@@ -158,6 +190,11 @@ pub enum NestsCmd {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
     },
+    /// Files attached to a nest (or a comment).
+    Files {
+        #[command(subcommand)]
+        cmd: crate::commands::files::FilesCmd,
+    },
     /// Add or remove a label on a nest.
     Label {
         #[command(subcommand)]
@@ -176,6 +213,89 @@ pub enum LabelCmd {
     Add { id: String, label_id: String },
     /// Remove a label from a nest.
     Remove { id: String, label_id: String },
+}
+
+/// Hint levels the nest reads accept.
+pub const HINT_LEVELS: [&str; 2] = ["full", "summary"];
+/// Hint severities, lowest first.
+pub const SEVERITIES: [&str; 4] = ["info", "suggestion", "warning", "alert"];
+
+/// The `hints`/`hintTypes`/`minSeverity` query params of a nest read.
+#[derive(Debug, Clone, Default)]
+pub struct HintOpts {
+    pub level: Option<String>,
+    pub types: Vec<String>,
+    pub min_severity: Option<String>,
+}
+
+impl HintOpts {
+    pub fn params(&self) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        if let Some(l) = &self.level {
+            out.push(("hints", l.clone()));
+        }
+        if !self.types.is_empty() {
+            out.push(("hintTypes", self.types.join(",")));
+        }
+        if let Some(m) = &self.min_severity {
+            out.push(("minSeverity", m.clone()));
+        }
+        out
+    }
+}
+
+/// The single-nest diagnosis params of a nest read: `provenance`, `rights`
+/// (optionally `forUser`) and `whoCan`.
+#[derive(Debug, Clone, Default)]
+pub struct Diagnosis {
+    pub provenance: bool,
+    pub rights: bool,
+    pub for_user: Option<String>,
+    pub who_can: Vec<String>,
+}
+
+impl Diagnosis {
+    fn any(&self) -> bool {
+        self.provenance || self.rights || !self.who_can.is_empty()
+    }
+
+    /// Query params for reading `ids`; an error when asked of several nests.
+    pub fn params(&self, ids: &str) -> anyhow::Result<Vec<(&'static str, String)>> {
+        if self.any() && ids.contains(',') {
+            anyhow::bail!("--provenance, --rights and --who-can work on a single nest id");
+        }
+        let mut out = Vec::new();
+        if self.provenance {
+            out.push(("provenance", "true".to_string()));
+        }
+        if self.rights {
+            out.push(("rights", "true".to_string()));
+        }
+        if let Some(u) = &self.for_user {
+            out.push(("forUser", u.clone()));
+        }
+        if !self.who_can.is_empty() {
+            out.push(("whoCan", self.who_can.join(",")));
+        }
+        Ok(out)
+    }
+}
+
+/// Text mode: the diagnosis blocks a single-nest read returned, as indented JSON.
+fn print_diagnosis(data: &Value) -> Result<()> {
+    for (key, heading) in [
+        ("rights", "rights"),
+        ("whoCan", "who can"),
+        ("fieldsProvenance", "provenance"),
+    ] {
+        if let Some(v) = data.get(key) {
+            println!("{heading}:");
+            for line in render::sanitize(&serde_json::to_string_pretty(v)?).lines() {
+                println!("  {line}");
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn fetch_get(
@@ -456,7 +576,28 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             clean_text,
             fields_meta,
             hints,
+            hint_types,
+            min_severity,
+            provenance,
+            rights,
+            for_user,
+            who_can,
         } => {
+            let mut hint_params = HintOpts {
+                level: hints,
+                types: hint_types,
+                min_severity,
+            }
+            .params();
+            hint_params.extend(
+                Diagnosis {
+                    provenance,
+                    rights,
+                    for_user,
+                    who_can,
+                }
+                .params(&ids)?,
+            );
             let mut params: Vec<(&str, &str)> = Vec::new();
             if clean_text {
                 params.push(("cleanText", "true"));
@@ -464,14 +605,15 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             if fields_meta {
                 params.push(("fieldsMetaData", "true"));
             }
-            if hints {
-                params.push(("hints", "true"));
-            }
+            params.extend(hint_params.iter().map(|(k, v)| (*k, v.as_str())));
             let data = fetch_get(&client, &ids, &params).await?;
             if data.is_array() {
                 render::output_nests(&data, None, cfg.output, false)?;
             } else {
                 render::output_nest_detail(&data, &cfg.host, cfg.output)?;
+                if cfg.output == crate::config::OutputFormat::Text {
+                    print_diagnosis(&data)?;
+                }
             }
         }
         NestsCmd::Children {
@@ -480,7 +622,17 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             limit,
             page,
             clean_text,
+            sort,
+            hints,
+            hint_types,
+            min_severity,
         } => {
+            let hint_params = HintOpts {
+                level: hints,
+                types: hint_types,
+                min_severity,
+            }
+            .params();
             let limit = limit.map(|n| n.to_string());
             let page = page.map(|n| n.to_string());
             let mut params: Vec<(&str, &str)> = Vec::new();
@@ -496,6 +648,10 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             if clean_text {
                 params.push(("cleanText", "true"));
             }
+            if let Some(s) = &sort {
+                params.push(("sort", s));
+            }
+            params.extend(hint_params.iter().map(|(k, v)| (*k, v.as_str())));
             let (data, meta) = fetch_children(&client, &id, &params).await?;
             render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
@@ -589,6 +745,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             let data = bulk_reorder(&client, cfg.require_workspace()?, &ids).await?;
             render::output_nests(&data, None, cfg.output, false)?;
         }
+        NestsCmd::Files { cmd } => crate::commands::files::run(cmd, &cfg, &client, g).await?,
         NestsCmd::Label { cmd } => {
             safety::enforce_read_only(g.read_only, "nests label")?;
             let data = match cmd {

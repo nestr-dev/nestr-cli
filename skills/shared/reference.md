@@ -50,11 +50,12 @@ workspace-scoped command with no active workspace errors with guidance to run
 
 - **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
   `roles`, `users`, `groups`, `labels list`/`labels get`, `insights`, `export`,
-  `webhooks`, `workspaces apps`, `nests bulk-reorder`, `connectors`, and `agents` (except
-  `agents mode`).
+  `webhooks`, `workspaces apps`, `workspaces docs`, `nests bulk-reorder`, `connectors`,
+  `agents` (except `agents mode`), and `hints` with no nest id.
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
-  `comments`, `inbox`, `plan`, `notifications`, `dm`, `queues`, `tensions`, `links`, `me`,
-  `auth`, `profiles`, `workspaces list`/`get`/`use`/`create`, `agents mode`.
+  `nests files`, `comments`, `inbox`, `plan`, `notifications`, `dm`, `queues`, `tensions`,
+  `links`, `activity`, `me`, `auth`, `profiles`, `workspaces list`/`get`/`use`/`create`,
+  `agents mode`.
 
 **Search is workspace-scoped.** Results only come from the active workspace (or the
 `--in <nestId>` subtree) — there is no cross-workspace search endpoint. If a search
@@ -255,14 +256,14 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 |---|---|---|
 | `auth`, `profiles`, `me` | authenticate, switch profiles, identity | this reference |
 | `search` | find nests across a workspace or subtree | nestr-basics |
-| `nests` | read/create/update/delete/reorder nests + labels, dates, recurrence | nestr-basics |
+| `nests` | read/create/update/delete/reorder nests + labels, dates, recurrence; `nests files` attachments | nestr-basics |
 | `comments` | discuss on a nest | nestr-basics |
-| `inbox`, `plan`, `work` | capture, plan the day, open work | nestr-basics |
+| `inbox`, `plan`, `work`, `activity` | capture, plan the day, open work, recent activity | nestr-basics |
 | `notifications`, `labels`, `projects` | stay current, labels, projects | nestr-basics |
 | `dm`, `queues` | direct messages, support queues | nestr-basics |
 | `tensions` | governance: propose → consent → enact | nestr-governance |
-| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members | nestr-org |
-| `links`, `insights`, `export` | graph links, metrics, JSON dumps | nestr-insights |
+| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members; `workspaces docs` reference documents | nestr-org |
+| `links`, `insights`, `hints`, `export` | graph links, metrics, hint counts, JSON dumps | nestr-insights |
 | `webhooks` | workspace event subscriptions | nestr-webhooks |
 | `agents` | create and run agents; reactive or autonomous mode per nest | nestr-agents |
 | `connectors` | connector catalog, bindings to roles, connect links | nestr-agents |
