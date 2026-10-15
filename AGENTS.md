@@ -94,11 +94,30 @@ cosign, …) are ignored.
 
 ## Release
 
-`.github/workflows/release.yml` is tag-triggered (`v*`): the `verify-version` job
-requires the tag to equal `Cargo.toml`'s `version`. It builds 5 targets and publishes
-SHA-256 checksums + a keyless cosign signature + a CycloneDX SBOM. `install.sh` is the
-artifact-naming contract — rename an archive in one, change the other. crates.io,
-Homebrew, nix, and shell completions are intentionally **not** wired up.
+main is protected, so a release goes through a PR. From an up-to-date, clean `main`:
+
+```sh
+scripts/release.sh --dry-run patch   # or minor | major | X.Y.Z; changes nothing
+scripts/release.sh patch
+```
+
+The script bumps `Cargo.toml` and `Cargo.lock`, opens a `release/vX.Y.Z` PR with a
+changelog since the last tag, and arms squash auto-merge (the repo must allow
+auto-merge). Every release needs two people. Run the script as a repo admin, because
+only users who can bypass the `v*` tag ruleset can push the tag. Someone else approves
+the PR. Once it merges, the script tags the merge commit and pushes the tag. If it stops
+early (a failed required check, a timeout), finish once the PR merges with
+`git fetch origin main && git tag -a vX.Y.Z -m vX.Y.Z <merge-commit-sha> && git push origin vX.Y.Z`.
+`scripts/release_test.sh` tests it; CI runs that and ShellCheck.
+
+`.github/workflows/release.yml` runs on the `v*` tag. `verify-version` refuses a tag
+whose commit isn't on `main` or doesn't equal `Cargo.toml`'s `version`. It builds 5
+targets, publishes SHA-256 checksums + a keyless cosign signature + a CycloneDX SBOM,
+then updates the Homebrew formula in `nestr-dev/homebrew-tap` (the `homebrew` job,
+`environment: release`, which holds `HOMEBREW_TAP_TOKEN`). A tag push is the only
+trigger. To retry a failed release, use **Re-run jobs** on that tag's run in Actions.
+`install.sh` is the artifact-naming contract — rename an archive in one, change the
+other. crates.io, nix, and shell completions are intentionally **not** wired up.
 
 ## Specs
 
