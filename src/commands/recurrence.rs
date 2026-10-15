@@ -217,6 +217,9 @@ pub fn skip_message(data: &Value) -> String {
     let restore = data.get("restoreId").and_then(Value::as_str);
     if data.get("deleted").and_then(Value::as_bool) == Some(true) {
         let series = data.get("seriesId").and_then(Value::as_str);
+        // The route answers restoreId == seriesId only when the cut ended the whole
+        // series (it restores the series' own id); any other cut names the deleted
+        // future root. seriesId being opaque does not stop the two matching.
         let head = if restore.is_some() && restore == series {
             format!("The cut at {at} was the first occurrence, so the whole series was deleted.")
         } else {
