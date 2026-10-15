@@ -27,6 +27,10 @@ Linux/macOS/Windows, lint (fmt + clippy + cargo-audit) on Linux. Tests are herme
 integration tests under `tests/<group>.rs` mock the API with `wiremock`; no live server
 is needed.
 
+`claude-code-review.yml` runs a Claude review on every non-draft, same-repo,
+non-Dependabot PR and ends with a formal APPROVE or REQUEST_CHANGES. It needs the
+`ANTHROPIC_API_KEY` repo secret and uses this file for conventions.
+
 ## Gotcha: doc commands are tested
 
 `tests/skill_accuracy.rs` extracts every `nestr …` command from the ` ```bash `/
