@@ -176,6 +176,8 @@ enum Commands {
     },
     /// Your open work (projects + todos).
     Work,
+    /// Recent activity: yours, or another user's with --user.
+    Activity(nestr_cli::commands::activity::ActivityArgs),
     /// Workspaces and their apps.
     Workspaces {
         #[command(subcommand)]
@@ -309,6 +311,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Labels { cmd } => labels::run(cmd, &g).await,
         Commands::Projects { cmd } => projects::run(cmd, &g).await,
         Commands::Work => work::run(&g).await,
+        Commands::Activity(args) => nestr_cli::commands::activity::run(args, &g).await,
         Commands::Workspaces { cmd } => workspaces::run(cmd, &g).await,
         Commands::Circles { cmd } => circles::run(cmd, &g).await,
         Commands::Roles { cmd } => roles::run(cmd, &g).await,
