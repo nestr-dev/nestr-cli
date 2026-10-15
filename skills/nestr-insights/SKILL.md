@@ -16,15 +16,24 @@ agents). Full setup, env overrides, and the command map:
 
 ## Relate nests (graph links)
 
-Links are bidirectional and grouped by a free-text **relation** (e.g. `meeting`):
+Links are **directed** and grouped by a free-text **relation** (e.g. `meeting`). A
+link runs from a source nest to a target; the target lists it as incoming. Argument
+order is the direction, so `links add A rel B` and `links add B rel A` are different
+links, and `links remove` only removes the one in the order you give.
 
 ```bash
-nestr links list <nestId>                       # all links of a nest
+nestr links list <nestId>                       # all links of a nest, with direction
 nestr links list <nestId> --relation meeting    # filter by relation
 nestr links list <nestId> --direction in        # incoming only (in | out)
-nestr links add <nestId> meeting <targetId>     # link two nests via "meeting"
-nestr links remove <nestId> meeting <targetId>  # unlink
+nestr links add <sourceId> meeting <targetId>   # link source -> target via "meeting"
+nestr links remove <sourceId> meeting <targetId> # remove that source -> target link
+nestr links add <dependentId> depends_on <predecessorId>  # dependent waits for predecessor
 ```
+
+A `depends_on` link that would create a cycle is refused. For other relations, a link
+that already runs the other way is refused rather than doubled: remove it first. If
+`links remove` finds the link only in the other direction, the error prints the
+command that removes it.
 
 ## Read metrics (insights)
 
