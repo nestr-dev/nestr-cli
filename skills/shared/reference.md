@@ -73,7 +73,7 @@ raw unwrapped data.
 
 **Warnings go to stderr.** When the API says it ignored something or narrowed a
 query, the CLI prints that to **stderr** and leaves stdout as the unwrapped data:
-ignored write keys (`warnings`, e.g. a misspelled `--field`), dropped search
+parts of a write it skipped (`warnings`, e.g. a read-only or deprecated `--field`), dropped search
 operators (`searchWarnings`), defaults it added (`appliedDefaults`, e.g. the
 `depth:1` that `nests children --search` gets), and response-level `hints` (e.g.
 unread posts). In text mode each prints as a `warning:` / `note:` / `hint:` line; in
