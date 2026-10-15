@@ -146,3 +146,22 @@ async fn remove_missing_link_keeps_the_api_message() {
         .to_string();
     assert!(err.contains("No graph link found from a to b"), "{err}");
 }
+
+#[tokio::test]
+async fn add_depends_on_other_422_keeps_only_the_api_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/a/graph/depends_on"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+            "status":"error","message":"Each item must have a targetId or _id"
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = links::add_link(&client, "a", "depends_on", "b")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("Each item must have a targetId"), "{err}");
+    assert!(!err.contains("waits for"), "{err}");
+}

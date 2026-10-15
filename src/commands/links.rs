@@ -104,7 +104,9 @@ fn explain_add_refusal(e: NestrError, source: &str, relation: &str, target: &str
     let NestrError::Validation(msg) = e else {
         return e;
     };
-    let advice = if relation == DEPENDS_ON {
+    let refused_dependency =
+        msg.contains("would create a cycle") || msg.contains("cannot depend on each other");
+    let advice = if relation == DEPENDS_ON && refused_dependency {
         format!(
             "{source} depends_on {target} means {source} waits for {target}. \
              Check which nest is the dependent, and `nestr links list {target} --relation depends_on` \
