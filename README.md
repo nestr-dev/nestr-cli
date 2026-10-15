@@ -91,6 +91,8 @@ nestr work                    # open projects + todos
 | `--yes` | skip destructive-action confirmations (required for agents/scripts) |
 | `--read-only` | hard-block every write (also `NESTR_READ_ONLY=1`) |
 
+API warnings (an ignored write key, a dropped search operator, a default the server applied) print to **stderr**, as `warning:` lines in text mode and as one JSON object per response in `-o json` mode, so stdout stays pipeable.
+
 Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`. Credentials live in the OS keyring, or a `0600` file on platforms without one (e.g. Linux musl builds).
 
 ## Commands

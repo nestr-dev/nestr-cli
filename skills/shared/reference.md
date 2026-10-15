@@ -68,6 +68,16 @@ and inbox items are lighter nests of their own. Responses come in a few shapes
 (`{status, data, …}`, a bare array, or a bare object); `-o json` always prints the
 raw unwrapped data.
 
+**Warnings go to stderr.** When the API says it ignored something or narrowed a
+query, the CLI prints that to **stderr** and leaves stdout as the unwrapped data:
+ignored write keys (`warnings`, e.g. a misspelled `--field`), dropped search
+operators (`searchWarnings`), defaults it added (`appliedDefaults`, e.g. the
+`depth:1` that `nests children --search` gets), and response-level `hints` (e.g.
+unread posts). In text mode each prints as a `warning:` / `note:` / `hint:` line; in
+`-o json` mode each response's notices print as one compact JSON object on stderr,
+keyed as the API sends them (`{"warnings":[…]}`). Read stderr after a write: a
+`warning:` there means part of the request was not saved.
+
 Most list commands paginate with `--limit` and `--page` (page-based); pass `--page N`
 to fetch the next page when the footer shows more. (`notifications list` is the
 exception — it pages with `--limit`/`--skip`.)

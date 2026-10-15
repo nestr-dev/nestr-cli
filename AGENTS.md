@@ -68,6 +68,11 @@ cosign, …) are ignored.
 - **API envelopes are inconsistent.** Responses arrive as `{status,data}`, a bare
   array, or a bare object — deserialize per-endpoint and unwrap. `-o json` always
   prints the unwrapped data; keep both `-o text` and `-o json` working for every command.
+- **API notices go to stderr, automatically.** `NestrClient::request` pulls
+  `warnings` / `searchWarnings` / `appliedDefaults` / top-level `hints` out of every
+  enveloped response (`src/notices.rs`) and prints them to stderr (text lines, or one
+  JSON object per response under `-o json`). A new command gets this for free through
+  `resolve_client`; don't print these keys yourself. Tests read `client.notices()`.
 - **Profiles = workspace + identity.** Resolution precedence: CLI flags > env
   (`NESTR_PROFILE` / `NESTR_API_KEY` / `NESTR_HOST`) > profile > defaults.
 - **OAuth install identity.** Each profile carries a random `client_instance_id`
