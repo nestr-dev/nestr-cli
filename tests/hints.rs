@@ -141,3 +141,46 @@ fn hint_lines_group_a_listing_by_nest() {
         ]
     );
 }
+
+#[tokio::test]
+async fn nest_get_diagnosis_flags_become_query_params() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1"))
+        .and(query_param("provenance", "true"))
+        .and(query_param("rights", "true"))
+        .and(query_param("forUser", "u2"))
+        .and(query_param("whoCan", "update,delete"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {"_id": "n1", "title": "x", "rights": {"self": {"update": false}},
+                     "whoCan": {"update": []}, "fieldsProvenance": {}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let diag = nests::Diagnosis {
+        provenance: true,
+        rights: true,
+        for_user: Some("u2".into()),
+        who_can: vec!["update".into(), "delete".into()],
+    };
+    let owned = diag.params("n1").unwrap();
+    let params: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let data = nests::fetch_get(&client, "n1", &params).await.unwrap();
+    assert_eq!(data["rights"]["self"]["update"], false);
+}
+
+#[test]
+fn diagnosis_is_for_a_single_nest() {
+    let diag = nests::Diagnosis {
+        rights: true,
+        ..Default::default()
+    };
+    assert!(diag.params("n1,n2").is_err());
+    assert!(nests::Diagnosis::default()
+        .params("n1,n2")
+        .unwrap()
+        .is_empty());
+}

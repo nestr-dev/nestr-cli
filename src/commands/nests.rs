@@ -27,6 +27,18 @@ pub enum NestsCmd {
         /// Drop hints below this severity. Needs --hints.
         #[arg(long, value_parser = SEVERITIES, requires = "hints")]
         min_severity: Option<String>,
+        /// Single nest: which label and circle context defines each field and property.
+        #[arg(long)]
+        provenance: bool,
+        /// Single nest: your composed rights, with what blocks each operation and why.
+        #[arg(long)]
+        rights: bool,
+        /// With --rights, compose them for this user id instead (needs nest admin).
+        #[arg(long, value_name = "USER_ID", requires = "rights")]
+        for_user: Option<String>,
+        /// Single nest: who can perform these operations (comma-separated).
+        #[arg(long, value_delimiter = ',', value_parser = ["read", "update", "delete", "create"])]
+        who_can: Vec<String>,
     },
     /// List the direct children of a nest.
     Children {
@@ -230,6 +242,60 @@ impl HintOpts {
         }
         out
     }
+}
+
+/// The single-nest diagnosis params of a nest read: `provenance`, `rights`
+/// (optionally `forUser`) and `whoCan`.
+#[derive(Debug, Clone, Default)]
+pub struct Diagnosis {
+    pub provenance: bool,
+    pub rights: bool,
+    pub for_user: Option<String>,
+    pub who_can: Vec<String>,
+}
+
+impl Diagnosis {
+    fn any(&self) -> bool {
+        self.provenance || self.rights || !self.who_can.is_empty()
+    }
+
+    /// Query params for reading `ids`; an error when asked of several nests.
+    pub fn params(&self, ids: &str) -> anyhow::Result<Vec<(&'static str, String)>> {
+        if self.any() && ids.contains(',') {
+            anyhow::bail!("--provenance, --rights and --who-can work on a single nest id");
+        }
+        let mut out = Vec::new();
+        if self.provenance {
+            out.push(("provenance", "true".to_string()));
+        }
+        if self.rights {
+            out.push(("rights", "true".to_string()));
+        }
+        if let Some(u) = &self.for_user {
+            out.push(("forUser", u.clone()));
+        }
+        if !self.who_can.is_empty() {
+            out.push(("whoCan", self.who_can.join(",")));
+        }
+        Ok(out)
+    }
+}
+
+/// Text mode: the diagnosis blocks a single-nest read returned, as indented JSON.
+fn print_diagnosis(data: &Value) -> Result<()> {
+    for (key, heading) in [
+        ("rights", "rights"),
+        ("whoCan", "who can"),
+        ("fieldsProvenance", "provenance"),
+    ] {
+        if let Some(v) = data.get(key) {
+            println!("{heading}:");
+            for line in render::sanitize(&serde_json::to_string_pretty(v)?).lines() {
+                println!("  {line}");
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn fetch_get(
@@ -512,13 +578,26 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             hints,
             hint_types,
             min_severity,
+            provenance,
+            rights,
+            for_user,
+            who_can,
         } => {
-            let hint_params = HintOpts {
+            let mut hint_params = HintOpts {
                 level: hints,
                 types: hint_types,
                 min_severity,
             }
             .params();
+            hint_params.extend(
+                Diagnosis {
+                    provenance,
+                    rights,
+                    for_user,
+                    who_can,
+                }
+                .params(&ids)?,
+            );
             let mut params: Vec<(&str, &str)> = Vec::new();
             if clean_text {
                 params.push(("cleanText", "true"));
@@ -532,6 +611,9 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 render::output_nests(&data, None, cfg.output, false)?;
             } else {
                 render::output_nest_detail(&data, &cfg.host, cfg.output)?;
+                if cfg.output == crate::config::OutputFormat::Text {
+                    print_diagnosis(&data)?;
+                }
             }
         }
         NestsCmd::Children {

@@ -9,11 +9,13 @@ const WRITE_VERBS: &[&str] = &[
     "bulk-reorder",
     "create",
     "delete",
+    "move",
     "remove",
     "reorder",
     "set",
     "set-default",
     "update",
+    "upload",
 ];
 
 pub fn is_write_verb(name: &str) -> bool {

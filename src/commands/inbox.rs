@@ -41,6 +41,13 @@ pub enum InboxCmd {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
     },
+    /// Move one inbox item before or after another.
+    Move {
+        id: String,
+        #[arg(value_parser = ["before", "after"])]
+        position: String,
+        related_id: String,
+    },
 }
 
 pub async fn fetch_list(
@@ -94,6 +101,22 @@ pub async fn reorder(client: &NestrClient, ids: &[String]) -> crate::error::Resu
     Ok(data)
 }
 
+pub async fn move_item(
+    client: &NestrClient,
+    id: &str,
+    position: &str,
+    related_id: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(
+            &format!("/users/me/inbox/{id}/reorder/{position}/{related_id}"),
+            &serde_json::json!({}),
+        )
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
 pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
@@ -142,6 +165,15 @@ pub async fn run(cmd: InboxCmd, g: &GlobalArgs) -> Result<()> {
             safety::enforce_read_only(g.read_only, "inbox reorder")?;
             let data = reorder(&client, &ids).await?;
             render::output_nests(&data, None, cfg.output, false)?;
+        }
+        InboxCmd::Move {
+            id,
+            position,
+            related_id,
+        } => {
+            safety::enforce_read_only(g.read_only, "inbox move")?;
+            let data = move_item(&client, &id, &position, &related_id).await?;
+            render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
     }
     Ok(())
