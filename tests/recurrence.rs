@@ -375,3 +375,50 @@ async fn read_only_blocks_skip_before_writing() {
 
     std::env::remove_var("NESTR_HOME");
 }
+
+const NOT_APPLIED: &str =
+    "The schedule was not applied: this item repeats too many times to switch to all-day dates.";
+
+// A schedule write can save and still refuse the dates: 200 with a warning, which
+// the client collects (and prints to stderr) while the nest still unwraps.
+#[tokio::test]
+async fn schedule_write_warning_on_update_is_collected() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/n1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "success", "data": {"_id": "n1", "title": "Sync"}, "warnings": [NOT_APPLIED]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut body = serde_json::json!({});
+    nestr_cli::commands::nests::apply_schedule(&mut body, None, Some(true), false);
+    let data = nestr_cli::commands::nests::update_nest(&client, "n1", &body)
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "n1");
+    assert_eq!(
+        client.notices()[0]["warnings"],
+        serde_json::json!([NOT_APPLIED])
+    );
+}
+
+#[tokio::test]
+async fn schedule_write_warning_on_edit_is_collected() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/nests/n1/recurrence/{INSTANT}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "success", "data": {"_id": "occ1"}, "warnings": [NOT_APPLIED]
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let nest =
+        recurrence::edit_occurrence(&client, "n1", INSTANT, &serde_json::json!({"allDay": true}))
+            .await
+            .unwrap();
+    assert_eq!(nest["_id"], "occ1");
+    assert_eq!(client.notices().len(), 1);
+}
