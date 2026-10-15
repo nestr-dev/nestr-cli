@@ -370,10 +370,6 @@ impl AgentView {
 /// One agent's operating mode on one nest.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AgentModeView {
-    #[serde(default, rename = "agentUserId")]
-    pub agent_user_id: String,
-    #[serde(default, rename = "nestId")]
-    pub nest_id: String,
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]

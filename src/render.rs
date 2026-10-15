@@ -876,10 +876,7 @@ pub fn agent_mode(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Text => {
             let m: AgentModeView = serde_json::from_value(data.clone()).unwrap_or_default();
             if m.cleared == Some(true) {
-                println!(
-                    "Cleared agent {}'s own mode on {}; it inherits again.",
-                    m.agent_user_id, m.nest_id
-                );
+                println!("Cleared this nest's own mode; the agent inherits again.");
                 return Ok(());
             }
             let mode = clean_text(&m.mode.unwrap_or_default());
@@ -911,7 +908,8 @@ pub fn agent_run(data: &Value, output: OutputFormat) -> Result<()> {
             let nest = data.get("nestId").and_then(Value::as_str).unwrap_or("");
             println!("Agent dispatched on {nest}.");
             match data.get("watchUrl").and_then(Value::as_str) {
-                Some(url) => println!("Watch it at {}", clean_text(url)),
+                // URLs skip clean_text: its entity decoding would mangle `&…` query params.
+                Some(url) => println!("Watch it at {}", sanitize(url)),
                 None => println!("It reports back on the item it was run on."),
             }
         }
@@ -1118,7 +1116,7 @@ pub fn connect_link(data: &Value, output: OutputFormat) -> Result<()> {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let url = data.get("url").and_then(Value::as_str).unwrap_or("");
-            println!("{}", clean_text(url));
+            println!("{}", sanitize(url));
             eprintln!(
                 "Give this link to a person to open. They sign in or enter the key there, so the secret never passes through the CLI."
             );
@@ -1404,6 +1402,14 @@ mod tests {
                 && out.contains("nest")
                 && out.contains("create")
         );
+    }
+
+    #[test]
+    fn sanitize_keeps_url_query_entities_intact() {
+        // Connect and watch links go through sanitize, not clean_text, whose
+        // entity decoding would turn `&notify` into `¬ify`.
+        let url = "https://app.test/n/ws?a=1&notify=x&copy=y";
+        assert_eq!(sanitize(url), url);
     }
 
     #[test]
