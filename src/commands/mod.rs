@@ -12,6 +12,7 @@ pub mod docs;
 pub mod export;
 pub mod files;
 pub mod groups;
+pub mod hints;
 pub mod inbox;
 pub mod insights;
 pub mod labels;

@@ -213,6 +213,8 @@ enum Commands {
         #[command(subcommand)]
         cmd: nestr_cli::commands::links::LinksCmd,
     },
+    /// Count hints (health signals) across a circle or the workspace.
+    Hints(nestr_cli::commands::hints::HintsArgs),
     /// Organizational-health insights (BETA).
     Insights {
         #[command(subcommand)]
@@ -319,6 +321,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Groups { cmd } => groups::run(cmd, &g).await,
         Commands::Tensions { cmd } => tensions::run(cmd, &g).await,
         Commands::Links { cmd } => links::run(cmd, &g).await,
+        Commands::Hints(args) => nestr_cli::commands::hints::run(args, &g).await,
         Commands::Insights { cmd } => insights::run(cmd, &g).await,
         Commands::Export { cmd } => export::run(cmd, &g).await,
         Commands::Webhooks { cmd } => webhooks::run(cmd, &g).await,

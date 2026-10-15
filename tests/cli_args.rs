@@ -130,3 +130,17 @@ fn unread_conflicts_with_read() {
         );
     }
 }
+
+#[test]
+fn nests_get_bare_hints_flag_still_precedes_the_id() {
+    // `--hints` takes its level only as `--hints=summary`, so a bare `--hints`
+    // before the id keeps parsing the way it did when it was a boolean.
+    let out = run(&["nests", "get", "--hints", "n1"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not found") || stderr.contains("profile"),
+        "expected to get past parsing, got: {stderr}"
+    );
+    let bad = run(&["nests", "get", "n1", "--hints=everything"]);
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("possible values"));
+}

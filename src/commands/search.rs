@@ -20,6 +20,25 @@ pub struct SearchArgs {
     /// Strip rich-text markup from results.
     #[arg(long)]
     pub clean_text: bool,
+    /// Reject the search if any operator, label or field filter is not recognised,
+    /// instead of silently returning a broader result. Use it when counting.
+    #[arg(long)]
+    pub strict: bool,
+    /// Sort order, e.g. `title`, `-createdAt` (overrides a sort: operator).
+    #[arg(long)]
+    pub sort: Option<String>,
+}
+
+/// Append the `strict:true` operator unless the query already carries it.
+pub fn strict_query(query: &str, strict: bool) -> String {
+    let has = query
+        .split_whitespace()
+        .any(|w| w.eq_ignore_ascii_case("strict:true"));
+    if !strict || has {
+        query.to_string()
+    } else {
+        format!("{query} strict:true")
+    }
 }
 
 /// Run the search and return `(data, meta)`, both already unwrapped.
@@ -60,6 +79,10 @@ pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
     if args.clean_text {
         extra.push(("cleanText", "true"));
     }
+    if let Some(s) = &args.sort {
+        extra.push(("sort", s));
+    }
+    let query = strict_query(&args.query, args.strict);
 
     // A workspace-wide search needs a workspace; a nest-scoped search (--in) does not.
     let workspace = if args.r#in.is_some() {
@@ -67,14 +90,7 @@ pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
     } else {
         cfg.require_workspace()?
     };
-    let (data, meta) = run_search(
-        &client,
-        workspace,
-        &args.query,
-        args.r#in.as_deref(),
-        &extra,
-    )
-    .await?;
+    let (data, meta) = run_search(&client, workspace, &query, args.r#in.as_deref(), &extra).await?;
     render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
     Ok(())
 }
