@@ -82,6 +82,21 @@ nestr nests label remove <id> <labelId>                 # remove one label
 `nests label add/remove` toggle a single label without touching the rest. `--assignee`
 likewise replaces the whole assigned set.
 
+## Dates & repeats
+
+```bash
+nestr nests update <id> --start 2026-10-05 --due 2026-10-09 --all-day   # a whole-day span
+nestr nests recurrence set <id> 'FREQ=WEEKLY;BYDAY=MO'                    # repeat weekly (needs a date)
+nestr nests recurrence occurrences <id>                                  # list them, with each INSTANT
+nestr nests recurrence skip <id> <instant>                               # skip one week
+nestr nests recurrence edit <id> <instant> --title "Sync (with guests)"  # change one occurrence
+```
+
+Occurrences past the next one are **virtual**: no nest exists until one is touched, so
+`search` won't find them. Address an occurrence by the INSTANT that `occurrences` prints,
+not by a date. `--start` with `--due` makes `--due` the end of the span. Details, and
+`remove` vs `delete-series`, are in the shared reference under "Dates & recurrence".
+
 ## Discuss & post updates
 
 Record progress as **comments** on the project or todo — don't rewrite the nest's
@@ -117,6 +132,6 @@ nestr projects list                      # every project in the workspace
 
 ## Safety
 
-Destructive commands (`nests delete`, `comments delete`) ask for confirmation;
+Destructive commands (`nests delete`, `nests recurrence skip`/`delete-series`, `comments delete`) ask for confirmation;
 pass `--yes` to skip it (required in agent/non-interactive contexts). Use
 `--read-only` to hard-block every write.

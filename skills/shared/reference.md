@@ -153,9 +153,66 @@ Two distinct fields on nests, circles, roles, and tension parts:
   circles and roles, optional-but-encouraged for a project. Purpose is **inherited**:
   a nest with no purpose of its own shows its parent's. Keep it to one line.
 - **`--description`** — the *body*: the actual details/content.
-- **`--due`** — a date, ISO format (e.g. `2026-07-01`).
+- **`--due`** — a date, ISO format (e.g. `2026-07-01`). With `--start` it is the *end*
+  of the span; without one it is the deadline (see [Dates & recurrence](#dates--recurrence)).
 
 Never put body text in `--purpose` — that is the classic Nestr mistake.
+
+## Dates & recurrence
+
+A nest's schedule is `start` + `due` (+ `allDay`). `nests create` and `nests update` take:
+
+- **`--start`** — when it begins: an ISO 8601 date-time (`2026-10-05T09:00:00+02:00`),
+  or `yyyy-mm-dd` for a whole day. With `--due` it makes a span and `--due` is the end.
+- **`--all-day`** — whole calendar days (`--all-day`, or `--all-day false` for instants).
+  `yyyy-mm-dd` dates imply it and are all-day on UTC day edges, so they read as the same
+  dates in every timezone.
+- **`--clear-start`** (update only) — drop the start, leaving `--due` as a deadline.
+
+A date the server can't read, or a due before the start, comes back as a
+`validation error:` with the server's reason, and nothing is written.
+
+```bash
+nestr nests create --title "Offsite" --parent <id> --start 2026-10-05 --due 2026-10-09 --all-day
+nestr nests update <id> --start 2026-10-12T09:00:00+02:00 --due 2026-10-12T10:00:00+02:00
+nestr nests update <id> --clear-start
+```
+
+**Recurrence.** `nests recurrence` makes a dated nest repeat on an RFC 5545 RRULE.
+Setting a rule creates **no** nests: occurrences past the next one are *virtual* (the
+rule produces the instant, no nest exists), so `search` and `nests children` can't see
+them. `nests recurrence occurrences` is the only way to list them. Each row has an
+**INSTANT** (epoch milliseconds): that is how `skip` and `edit` address an occurrence,
+so copy it as printed. A date is refused. Every command takes the id of the series or
+of any occurrence of it.
+
+```bash
+nestr nests recurrence set <id> 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10'   # quote it: ; is a shell separator
+nestr nests recurrence occurrences <id>                  # next 10; --past for history, --cursor to page
+nestr nests recurrence skip <id> <instant>               # skip one; the series carries on
+nestr nests recurrence skip <id> <instant> --following   # delete it and every later one, keep history
+nestr nests recurrence edit <id> <instant> --start 2026-10-14T09:00:00Z   # move just this one
+nestr nests recurrence edit <id> <instant>               # no flags: materialize it as a real nest
+nestr nests recurrence remove <id>                       # stop repeating, keep materialized nests
+nestr nests recurrence delete-series <id>                # delete the series and all its history
+```
+
+- The rule expands from the nest's start (its due when it has none); set a date first.
+- STATE in the listing is `virtual`, `nest` (materialized), `skipped`, plus `altered`
+  (changed from the series) and `done`. A skipped instant stays listed.
+- `edit` answers with the occurrence's own nest id. Use that id with every other `nests`
+  command from then on. A refused edit can still have materialized the occurrence.
+- The `seriesId` in `-o json` names the repeat itself. It is not a nest id, and
+  `nests get` on it is a 404.
+- `skip`, `skip --following` and `delete-series` ask for confirmation (`--yes` in
+  scripts and agent mode) and print the nest to restore in the Nestr app to undo.
+  Restoring brings back that nest only.
+- Rights are the server's: skipping needs update on the series (plus delete on a
+  materialized occurrence); `--following` and `delete-series` need delete on the series
+  and on every occurrence they remove. A refusal is a `permission denied` with nothing
+  written.
+- To leave dates out, `skip` them. Don't bound the rule with COUNT and start a second
+  series, because that leaves two nests with the same title.
 
 ## Formatting
 
@@ -198,7 +255,7 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 |---|---|---|
 | `auth`, `profiles`, `me` | authenticate, switch profiles, identity | this reference |
 | `search` | find nests across a workspace or subtree | nestr-basics |
-| `nests` | read/create/update/delete/reorder nests + labels | nestr-basics |
+| `nests` | read/create/update/delete/reorder nests + labels, dates, recurrence | nestr-basics |
 | `comments` | discuss on a nest | nestr-basics |
 | `inbox`, `plan`, `work` | capture, plan the day, open work | nestr-basics |
 | `notifications`, `labels`, `projects` | stay current, labels, projects | nestr-basics |
