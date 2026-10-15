@@ -103,9 +103,11 @@ scripts/release.sh patch
 
 The script bumps `Cargo.toml` and `Cargo.lock`, opens a `release/vX.Y.Z` PR with a
 changelog since the last tag, and arms squash auto-merge (the repo must allow
-auto-merge). The PR still needs an approving review from someone other than you. Once
-it merges, the script tags the merge commit and pushes the tag. If it stops early (a
-failed required check, a timeout), it prints the tag command to finish by hand.
+auto-merge). Every release needs two people. Run the script as a repo admin, because
+only users who can bypass the `v*` tag ruleset can push the tag. Someone else approves
+the PR. Once it merges, the script tags the merge commit and pushes the tag. If it stops
+early (a failed required check, a timeout), finish once the PR merges with
+`git fetch origin main && git tag -a vX.Y.Z -m vX.Y.Z <merge-commit-sha> && git push origin vX.Y.Z`.
 `scripts/release_test.sh` tests it; CI runs that and ShellCheck.
 
 `.github/workflows/release.yml` runs on the `v*` tag. `verify-version` refuses a tag
