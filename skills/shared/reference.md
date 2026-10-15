@@ -187,7 +187,8 @@ nestr nests update <id> --assignee <userId>          # reassign (replaces the wh
 
 The canonical web permalink for a nest is **`{host}/n/{nestId}`** — the path segment is
 `/n/`, never `/nest/`, `/nests/`, or a `#/` hash route. With a known parent it is
-`{host}/n/{parentId}/{nestId}` (opens the nest in context). `nests get`/`create`/`update`
+`{host}/n/{parentId}/{nestId}#{tab}` (opens the nest in context, on the parent's tab
+that lists it: `#projects`, `#roles`, `#tasks`, …). `nests get`/`create`/`update`
 print this as a `url:` line in `-o text`; don't hand-build links from memory.
 
 ## Command map
