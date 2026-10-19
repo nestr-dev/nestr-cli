@@ -226,20 +226,22 @@ impl NestrClient {
     ) -> Result<String> {
         validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
-        let resp = self.send(&method, &url, query, body).await?;
+        // The bearer this request goes out with, so a 401 names the token that
+        // was actually rejected even if a clone swaps the shared cell meanwhile.
+        let sent_with = self.auth.read().await.clone();
+        let resp = self.send(&method, &url, query, body, &sent_with).await?;
         // Nestr answers 401 when it doesn't accept the bearer (expired, revoked) and
         // 403 when it accepts it but refuses the request (rights, grant scope, the
         // read-only gate). Only a 401 is worth a refresh: a refreshed token carries the
         // same grant, and Nestr revokes the old pair on every refresh.
         let resp = match (resp.status(), &self.refresh) {
             (StatusCode::UNAUTHORIZED, Some(r)) => {
-                let stale = self.auth.read().await.clone();
                 let new_token = r
-                    .perform(&stale)
+                    .perform(&sent_with)
                     .await
                     .map_err(|e| session_rejected(true, &format!("token refresh failed: {e}")))?;
-                *self.auth.write().await = new_token;
-                self.send(&method, &url, query, body).await?
+                *self.auth.write().await = new_token.clone();
+                self.send(&method, &url, query, body, &new_token).await?
             }
             _ => resp,
         };
@@ -279,8 +281,8 @@ impl NestrClient {
         url: &str,
         query: &[(&str, &str)],
         body: Option<&Value>,
+        token: &str,
     ) -> Result<reqwest::Response> {
-        let token = self.auth.read().await.clone();
         let mut rb = self
             .inner
             .request(method.clone(), url)
