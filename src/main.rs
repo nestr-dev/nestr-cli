@@ -103,6 +103,7 @@ struct Cli {
         long,
         global = true,
         env = "NESTR_READ_ONLY",
+        value_parser = clap::builder::BoolishValueParser::new(),
         help_heading = "Global Options"
     )]
     read_only: bool,

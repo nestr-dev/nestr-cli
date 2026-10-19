@@ -144,3 +144,23 @@ fn nests_get_bare_hints_flag_still_precedes_the_id() {
     let bad = run(&["nests", "get", "n1", "--hints=everything"]);
     assert!(String::from_utf8_lossy(&bad.stderr).contains("possible values"));
 }
+
+#[test]
+fn read_only_env_accepts_one_and_zero() {
+    // The read-only-key error tells people to set NESTR_READ_ONLY=1, so it must parse.
+    for value in ["1", "0", "true", "false"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_nestr"))
+            .args(["auth", "status"])
+            .env("NESTR_HOME", tmp.path())
+            .env("NESTR_READ_ONLY", value)
+            .env_remove("NESTR_API_KEY")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("invalid value"),
+            "NESTR_READ_ONLY={value} was rejected: {stderr}"
+        );
+    }
+}
