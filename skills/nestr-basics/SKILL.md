@@ -202,7 +202,8 @@ nestr activity --user <userId>           # a colleague's (or an agent's) activit
 ```
 
 `activity` needs a user-scoped (OAuth) login; a workspace API key has no user to
-report on.
+report on. An OAuth login granted for a workspace only gets a "single user scoped
+access" error: run `nestr auth login` again and grant access to your own user account.
 
 ## Safety
 

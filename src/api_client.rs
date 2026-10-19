@@ -49,6 +49,37 @@ fn read_only_key_error(body: &str) -> Option<NestrError> {
     })
 }
 
+/// Nestr answers 403 "only available for single user scoped access" on the routes
+/// about the caller's own account (`users/me/...`) when the token's grant doesn't
+/// name the user, e.g. a grant for a workspace only. The token is fine; a refresh
+/// keeps the same grant, so say what the grant lacks instead.
+fn user_scope_error(msg: &str) -> Option<NestrError> {
+    msg.contains("single user scoped access").then(|| {
+        NestrError::Permission(format!(
+            "{msg}. This login's grant covers a workspace, not your own user account, \
+             and this command needs your own user account. Run `nestr auth login` and grant \
+             access to your own user account."
+        ))
+    })
+}
+
+/// The 401 text once the bearer is dead for good: no refresh possible, the refresh
+/// failed, or the refreshed token was rejected too.
+fn session_rejected(oauth: bool, detail: &str) -> NestrError {
+    NestrError::Auth(if oauth {
+        format!(
+            "the OAuth session is expired or revoked ({detail}). \
+             Run `nestr auth login` to sign in again."
+        )
+    } else {
+        format!(
+            "Nestr rejected the credentials ({detail}): the API key or OAuth session \
+             is invalid, expired or revoked. Check the API key, or run `nestr auth login` \
+             for an OAuth profile."
+        )
+    })
+}
+
 /// Reject path traversal, query/fragment injection, and out-of-alphabet segments
 /// in an API request path. Every request flows through `request_text`, and IDs are
 /// interpolated into `path` by callers, so this single chokepoint stops a crafted
@@ -185,7 +216,7 @@ impl NestrClient {
         self.request(Method::DELETE, path, &[], Some(body)).await
     }
 
-    /// Send a request (with one 403-refresh-retry) and return the raw checked body.
+    /// Send a request (with one 401-refresh-retry) and return the raw checked body.
     async fn request_text(
         &self,
         method: Method,
@@ -196,19 +227,17 @@ impl NestrClient {
         validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
         let resp = self.send(&method, &url, query, body).await?;
-        // On a 403 with a refresh context, refresh the token once and retry, unless
-        // the 403 is the read-only gate: a fresh token for the same key is just as
-        // read-only.
+        // Nestr answers 401 when it doesn't accept the bearer (expired, revoked) and
+        // 403 when it accepts it but refuses the request (rights, grant scope, the
+        // read-only gate). Only a 401 is worth a refresh: a refreshed token carries the
+        // same grant, and Nestr revokes the old pair on every refresh.
         let resp = match (resp.status(), &self.refresh) {
-            (StatusCode::FORBIDDEN, Some(r)) => {
-                let denial = resp.text().await.unwrap_or_default();
-                if let Some(e) = read_only_key_error(&denial) {
-                    return Err(e);
-                }
+            (StatusCode::UNAUTHORIZED, Some(r)) => {
+                let stale = self.auth.read().await.clone();
                 let new_token = r
-                    .perform()
+                    .perform(&stale)
                     .await
-                    .map_err(|e| NestrError::Auth(format!("token refresh failed: {e}")))?;
+                    .map_err(|e| session_rejected(true, &format!("token refresh failed: {e}")))?;
                 *self.auth.write().await = new_token;
                 self.send(&method, &url, query, body).await?
             }
@@ -274,15 +303,13 @@ impl NestrClient {
         let detail = extract_error_detail(&body);
         let msg = detail.unwrap_or_else(|| body.clone());
         if status == StatusCode::FORBIDDEN {
-            if let Some(e) = read_only_key_error(&body) {
+            if let Some(e) = read_only_key_error(&body).or_else(|| user_scope_error(&msg)) {
                 return Err(e);
             }
         }
         match status {
-            // Nestr uses 403 for auth failures too (401 is not used).
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(NestrError::Permission(
-                format!("{msg}. Check your token/scopes (run `nestr auth status`)."),
-            )),
+            StatusCode::UNAUTHORIZED => Err(session_rejected(self.refresh.is_some(), &msg)),
+            StatusCode::FORBIDDEN => Err(NestrError::Permission(msg)),
             StatusCode::NOT_FOUND => Err(NestrError::NotFound(msg)),
             StatusCode::PAYMENT_REQUIRED => Err(NestrError::PlanRequired(msg)),
             StatusCode::UNPROCESSABLE_ENTITY | StatusCode::BAD_REQUEST => {

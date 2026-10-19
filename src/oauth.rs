@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::config::CredentialStorage;
 
@@ -327,8 +327,9 @@ pub(crate) fn load_tokens_keyring(profile: &str) -> Result<Option<StoredOAuthTok
     }
 }
 
-/// Return a usable bearer token, refreshing if expired. For file storage,
-/// returns `Some(new_tokens)` when refreshed so the caller can persist them.
+/// Return a usable bearer token, refreshing if expired. A refresh is persisted
+/// before this returns; the refreshed set comes back as `Some` so the caller can
+/// keep its in-memory profile in step.
 pub async fn resolve_token(
     profile_name: &str,
     token_url: &str,
@@ -355,23 +356,60 @@ pub async fn resolve_token(
              use --api-key or a profile created for that host"
         );
     }
-    let refresh_token = current.refresh_token.clone().ok_or_else(|| {
+    let stored = refresh_serialized(
+        profile_name,
+        token_url,
+        client_id,
+        storage,
+        &current.access_token,
+    )
+    .await?;
+    Ok((stored.access_token.clone(), Some(stored)))
+}
+
+/// Refresh a profile's token pair with the profiles lock held across the token
+/// POST, so concurrent `nestr` processes rotate it one at a time, and persist the
+/// result before releasing the lock. Nestr revokes the old pair on every refresh,
+/// so a refreshed pair that isn't stored leaves the profile logged out.
+///
+/// `stale_access` is the access token that just stopped working. If the store now
+/// holds a different, unexpired one, another process refreshed first: that pair is
+/// returned as is, since refreshing again with the old refresh token would fail.
+async fn refresh_serialized(
+    profile_name: &str,
+    token_url: &str,
+    client_id: &str,
+    storage: CredentialStorage,
+    stale_access: &str,
+) -> Result<StoredOAuthTokens> {
+    let _lock = crate::config::lock_profiles()?;
+    let current = match storage {
+        CredentialStorage::OsStore => load_tokens_keyring(profile_name)?,
+        CredentialStorage::File => crate::config::load_profile(profile_name)?.oauth_tokens,
+    }
+    .ok_or_else(|| {
+        anyhow::anyhow!("No OAuth session for '{profile_name}'. Run `nestr auth login`.")
+    })?;
+    if current.access_token != stale_access && current.is_valid() {
+        return Ok(current);
+    }
+    let refresh_token = current.refresh_token.ok_or_else(|| {
         anyhow::anyhow!("OAuth session expired for '{profile_name}'. Run `nestr auth login`.")
     })?;
 
     let refreshed = refresh(token_url, client_id, &refresh_token).await?;
     let mut stored = tokens_to_stored(&refreshed);
-    // Preserve the existing refresh token if the server omitted a new one (RFC 6749 §6).
+    // RFC 6749 §6: a refresh response MAY omit refresh_token, meaning "keep the old one".
     if stored.refresh_token.is_none() {
-        stored.refresh_token = Some(refresh_token.clone());
+        stored.refresh_token = Some(refresh_token);
     }
     match storage {
-        CredentialStorage::OsStore => {
-            store_stored_tokens_keyring(profile_name, &stored)?;
-            Ok((stored.access_token.clone(), None))
+        CredentialStorage::OsStore => store_stored_tokens_keyring(profile_name, &stored)?,
+        CredentialStorage::File => {
+            crate::config::write_profile_oauth_tokens_locked(profile_name, &stored)?
         }
-        CredentialStorage::File => Ok((stored.access_token.clone(), Some(stored))),
     }
+    Ok(stored)
 }
 
 /// Read the current refresh token for a profile, from whichever store it uses.
@@ -387,15 +425,18 @@ pub fn current_refresh_token(
     Ok(tokens.and_then(|t| t.refresh_token))
 }
 
-/// Carries everything the client needs to refresh-and-persist on a 403.
-/// Cloneable: the `refresh_token` is shared so a rotation is visible to all clones.
+/// Carries everything the client needs to refresh-and-persist on a 401. The token
+/// pair itself is read from the profile's store at refresh time, never cached here,
+/// so a rotation by another process is picked up.
 #[derive(Debug, Clone)]
 pub struct ReactiveRefresh {
     token_url: String,
     client_id: String,
     profile_name: String,
     storage: CredentialStorage,
-    refresh_token: Arc<RwLock<String>>,
+    /// Queues refreshes from clones in this process; other processes queue on the
+    /// profiles lock.
+    gate: Arc<Mutex<()>>,
 }
 
 impl ReactiveRefresh {
@@ -404,37 +445,28 @@ impl ReactiveRefresh {
         client_id: String,
         profile_name: String,
         storage: CredentialStorage,
-        refresh_token: String,
     ) -> Self {
         Self {
             token_url,
             client_id,
             profile_name,
             storage,
-            refresh_token: Arc::new(RwLock::new(refresh_token)),
+            gate: Arc::default(),
         }
     }
 
-    /// Refresh the access token, persist the new set, rotate the refresh token,
-    /// and return the fresh access token.
-    pub async fn perform(&self) -> anyhow::Result<String> {
-        let rt = self.refresh_token.read().await.clone();
-        let resp = refresh(&self.token_url, &self.client_id, &rt).await?;
-        let mut stored = tokens_to_stored(&resp);
-        // RFC 6749 §6: a refresh response MAY omit refresh_token, meaning "keep the old one".
-        if stored.refresh_token.is_none() {
-            stored.refresh_token = Some(rt.clone());
-        }
-        match self.storage {
-            CredentialStorage::OsStore => store_stored_tokens_keyring(&self.profile_name, &stored)?,
-            CredentialStorage::File => {
-                crate::config::update_profile_oauth_tokens(&self.profile_name, &stored)?
-            }
-        }
-        // Keep the in-memory cell in sync with what we persisted.
-        if let Some(rt2) = &stored.refresh_token {
-            *self.refresh_token.write().await = rt2.clone();
-        }
+    /// Replace `stale_access` (the bearer the server just rejected) with a live
+    /// access token: refreshed and persisted, or the one another refresh already stored.
+    pub async fn perform(&self, stale_access: &str) -> anyhow::Result<String> {
+        let _gate = self.gate.lock().await;
+        let stored = refresh_serialized(
+            &self.profile_name,
+            &self.token_url,
+            &self.client_id,
+            self.storage,
+            stale_access,
+        )
+        .await?;
         Ok(stored.access_token)
     }
 }

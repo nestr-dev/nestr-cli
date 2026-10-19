@@ -87,7 +87,8 @@ pub async fn run_status(profile: Option<String>) -> Result<()> {
                     .and_then(|j| serde_json::from_str(&j).ok()),
             };
             match tokens {
-                Some(t) if t.is_valid() => println!("auth:      oauth (token valid)"),
+                // Local expiry only: the server may still have revoked the token.
+                Some(t) if t.is_valid() => println!("auth:      oauth (token not expired)"),
                 Some(_) => println!("auth:      oauth (token expired — `nestr auth login` or it will refresh on next call)"),
                 None => println!("auth:      oauth (not logged in — run `nestr auth login`)"),
             }
