@@ -262,28 +262,31 @@ pub fn save_profile(name: &str, profile: &Profile) -> Result<()> {
 /// read-modify-write of profile tokens, so two concurrent `nestr` processes
 /// (scripted/agent use) can't interleave a refresh. Released when the returned
 /// File drops. Uses `std::fs::File::lock` (stable since Rust 1.89). (SEC-10)
-fn lock_profiles() -> Result<std::fs::File> {
+pub(crate) fn lock_profiles() -> Result<std::fs::File> {
     create_dir_secure(&profiles_dir())?;
     let f = std::fs::File::create(profiles_dir().join(".lock")).context("opening profiles lock")?;
     f.lock().context("locking profiles dir")?;
     Ok(f)
 }
 
-/// Update just the OAuth token set on a stored profile. Takes an exclusive lock,
-/// then reloads from disk; if another process already wrote a still-valid token,
-/// keeps that instead of clobbering it with ours.
+/// Update just the OAuth token set on a stored profile, under the profiles lock.
 pub fn update_profile_oauth_tokens(
     name: &str,
     tokens: &crate::oauth::StoredOAuthTokens,
 ) -> Result<()> {
-    validate_profile_name(name)?;
     let _lock = lock_profiles()?;
+    write_profile_oauth_tokens_locked(name, tokens)
+}
+
+/// Reload the profile from disk and overwrite its token set. The caller must hold
+/// `lock_profiles()`. Always writes: Nestr revokes the old pair on every refresh, so
+/// a pair that came back from a successful refresh is the only live one.
+pub(crate) fn write_profile_oauth_tokens_locked(
+    name: &str,
+    tokens: &crate::oauth::StoredOAuthTokens,
+) -> Result<()> {
+    validate_profile_name(name)?;
     let mut profile = load_profile(name)?;
-    if let Some(existing) = &profile.oauth_tokens {
-        if existing.is_valid() && existing != tokens {
-            return Ok(());
-        }
-    }
     profile.oauth_tokens = Some(tokens.clone());
     save_profile(name, &profile)
 }
@@ -441,8 +444,8 @@ pub async fn resolve(
                     host_overridden,
                 )
                 .await?;
+                // resolve_token already persisted a refreshed set; keep ours in step.
                 if let Some(new_tokens) = refreshed {
-                    update_profile_oauth_tokens(&name, &new_tokens)?;
                     profile.oauth_tokens = Some(new_tokens);
                 }
                 bearer
@@ -455,20 +458,19 @@ pub async fn resolve(
         .unwrap_or(global.default_output_format);
 
     // Build the reactive-refresh context for OAuth profiles that still hold a
-    // refresh token (so a 403 can refresh-and-retry once). API-key profiles: None.
+    // refresh token (so a 401 can refresh-and-retry once). API-key profiles: None.
     let refresh = if profile.auth == AuthKind::OAuth && !host_overridden {
         crate::oauth::current_refresh_token(
             &name,
             profile.credential_storage,
             profile.oauth_tokens.as_ref(),
         )?
-        .map(|rt| {
+        .map(|_| {
             crate::oauth::ReactiveRefresh::new(
                 profile.token_url(),
                 profile.client_id(),
                 name.clone(),
                 profile.credential_storage,
-                rt,
             )
         })
     } else {
