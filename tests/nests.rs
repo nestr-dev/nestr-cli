@@ -468,7 +468,13 @@ fn update_body_includes_fields_object() {
 #[test]
 fn apply_schedule_sends_start_and_all_day() {
     let mut body = serde_json::json!({"title": "Offsite"});
-    nests::apply_schedule(&mut body, Some("2026-10-05".into()), Some(true), false);
+    nests::apply_schedule(
+        &mut body,
+        Some("2026-10-05".into()),
+        Some(true),
+        false,
+        false,
+    );
     assert_eq!(body["start"], "2026-10-05");
     assert_eq!(body["allDay"], true);
     assert_eq!(body["title"], "Offsite");
@@ -477,21 +483,28 @@ fn apply_schedule_sends_start_and_all_day() {
 #[test]
 fn apply_schedule_sends_all_day_false_to_flip_back_to_instants() {
     let mut body = serde_json::json!({});
-    nests::apply_schedule(&mut body, None, Some(false), false);
+    nests::apply_schedule(&mut body, None, Some(false), false, false);
     assert_eq!(body, serde_json::json!({"allDay": false}));
 }
 
 #[test]
 fn apply_schedule_clear_start_sends_null() {
     let mut body = serde_json::json!({});
-    nests::apply_schedule(&mut body, None, None, true);
+    nests::apply_schedule(&mut body, None, None, true, false);
     assert_eq!(body, serde_json::json!({"start": null}));
+}
+
+#[test]
+fn apply_schedule_clear_due_sends_null() {
+    let mut body = serde_json::json!({});
+    nests::apply_schedule(&mut body, None, None, false, true);
+    assert_eq!(body, serde_json::json!({"due": null}));
 }
 
 #[test]
 fn apply_schedule_leaves_body_alone_when_nothing_given() {
     let mut body = serde_json::json!({"title": "x"});
-    nests::apply_schedule(&mut body, None, None, false);
+    nests::apply_schedule(&mut body, None, None, false, false);
     assert_eq!(body, serde_json::json!({"title": "x"}));
 }
 
@@ -512,10 +525,92 @@ async fn update_with_bad_start_surfaces_the_servers_422() {
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
     let mut body = serde_json::json!({});
-    nests::apply_schedule(&mut body, Some("next tuesday".into()), None, false);
+    nests::apply_schedule(&mut body, Some("next tuesday".into()), None, false, false);
     let err = nests::update_nest(&client, "n1", &body).await.unwrap_err();
     assert_eq!(
         err.to_string(),
         "validation error: start must be an ISO 8601 date-time or a yyyy-mm-dd date"
     );
+}
+
+/// Run the real binary against the mock server with an api-key profile. The profile
+/// is written straight into the temp dir: setting NESTR_HOME process-wide would race
+/// the other tests in this binary that do.
+fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
+    use nestr_cli::config::{config_dir_in, AuthKind, CredentialStorage, Profile};
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = Profile {
+        auth: AuthKind::ApiKey,
+        credential_storage: CredentialStorage::File,
+        host: host.into(),
+        workspace_id: "ws".into(),
+        api_key: Some("k".into()),
+        oauth_client_id: None,
+        oauth_token_url: None,
+        oauth_authorize_url: None,
+        oauth_tokens: None,
+        client_instance_id: None,
+        default_output_format: None,
+    };
+    let profiles = config_dir_in(Some(tmp.path().into())).join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("t.toml"),
+        toml::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+    std::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
+        .args(["--profile", "t", "--yes"])
+        .args(args)
+        .env("NESTR_HOME", tmp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_PROFILE")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_READ_ONLY")
+        .env_remove("NESTR_AGENT_MODE")
+        .output()
+        .unwrap()
+}
+
+/// Run `nestr nests update n1 <args>` and assert the PATCH body is exactly `body`.
+async fn assert_update_sends(args: &[&str], body: serde_json::Value) {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/nests/n1"))
+        .and(wiremock::matchers::body_json(body))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n1","title":"T"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut argv = vec!["-o", "json", "nests", "update", "n1"];
+    argv.extend_from_slice(args);
+    let out = run_cli(&server.uri(), &argv);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_due_sends_due_null() {
+    assert_update_sends(&["--clear-due"], serde_json::json!({"due": null})).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_start_and_clear_due_sends_both_null() {
+    assert_update_sends(
+        &["--clear-start", "--clear-due"],
+        serde_json::json!({"start": null, "due": null}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_due_combines_with_start_and_all_day() {
+    assert_update_sends(
+        &["--start", "2026-10-05", "--all-day", "--clear-due"],
+        serde_json::json!({"start": "2026-10-05", "allDay": true, "due": null}),
+    )
+    .await;
 }

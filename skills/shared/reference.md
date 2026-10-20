@@ -169,6 +169,9 @@ A nest's schedule is `start` + `due` (+ `allDay`). `nests create` and `nests upd
   `yyyy-mm-dd` dates imply it and are all-day on UTC day edges, so they read as the same
   dates in every timezone.
 - **`--clear-start`** (update only) — drop the start, leaving `--due` as a deadline.
+- **`--clear-due`** (update only) — drop the due date (sends `due: null`). On a
+  meeting, a `--start` in the same call re-derives the end from the meeting's
+  duration, so the due is not cleared.
 
 A date the server can't read, or a due before the start, comes back as a
 `validation error:` with the server's reason, and nothing is written.
@@ -177,6 +180,7 @@ A date the server can't read, or a due before the start, comes back as a
 nestr nests create --title "Offsite" --parent <id> --start 2026-10-05 --due 2026-10-09 --all-day
 nestr nests update <id> --start 2026-10-12T09:00:00+02:00 --due 2026-10-12T10:00:00+02:00
 nestr nests update <id> --clear-start
+nestr nests update <id> --clear-due
 ```
 
 **Recurrence.** `nests recurrence` makes a dated nest repeat on an RFC 5545 RRULE.

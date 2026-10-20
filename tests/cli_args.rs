@@ -164,3 +164,21 @@ fn read_only_env_accepts_one_and_zero() {
         );
     }
 }
+
+#[test]
+fn nests_update_clear_due_conflicts_with_due() {
+    let out = run(&[
+        "nests",
+        "update",
+        "n1",
+        "--due",
+        "2026-07-01",
+        "--clear-due",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("cannot be used with"),
+        "expected a clap conflict error, got: {stderr}"
+    );
+}

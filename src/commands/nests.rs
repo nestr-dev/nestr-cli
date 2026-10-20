@@ -153,6 +153,10 @@ pub enum NestsCmd {
         /// Remove the start, leaving --due as a plain deadline.
         #[arg(long, conflicts_with = "start")]
         clear_start: bool,
+        /// Remove the due date. On a meeting, a --start sent with it re-derives the
+        /// end from the meeting's duration, so the due is not cleared.
+        #[arg(long, conflicts_with = "due")]
+        clear_due: bool,
         /// Mark the nest done (or not).
         #[arg(long)]
         completed: Option<bool>,
@@ -459,13 +463,16 @@ pub fn update_body(
 }
 
 /// Add the schedule keys to a create/update body: `start`, `allDay`, and
-/// `start: null` for `--clear-start`. The server writes them through the schedule
-/// editor's own path and refuses an unreadable date with a 422.
+/// `start: null` / `due: null` for `--clear-start` / `--clear-due`. The server
+/// writes `start`/`allDay`, and a `due` sent with them, through the schedule
+/// editor's own path and refuses an unreadable date with a 422; a `due` on its
+/// own takes the direct write.
 pub fn apply_schedule(
     body: &mut Value,
     start: Option<String>,
     all_day: Option<bool>,
     clear_start: bool,
+    clear_due: bool,
 ) {
     let Some(map) = body.as_object_mut() else {
         return;
@@ -474,6 +481,9 @@ pub fn apply_schedule(
         map.insert("start".into(), s.into());
     } else if clear_start {
         map.insert("start".into(), Value::Null);
+    }
+    if clear_due {
+        map.insert("due".into(), Value::Null);
     }
     if let Some(a) = all_day {
         map.insert("allDay".into(), a.into());
@@ -681,7 +691,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &users,
                 &field_values,
             );
-            apply_schedule(&mut body, start, all_day, false);
+            apply_schedule(&mut body, start, all_day, false, false);
             let data = create_nest(&client, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
@@ -694,6 +704,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             start,
             all_day,
             clear_start,
+            clear_due,
             completed,
             parent,
             labels,
@@ -717,7 +728,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &users,
                 &field_values,
             );
-            apply_schedule(&mut body, start, all_day, clear_start);
+            apply_schedule(&mut body, start, all_day, clear_start, clear_due);
             let data = update_nest(&client, &id, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }

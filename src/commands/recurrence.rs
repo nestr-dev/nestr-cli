@@ -342,7 +342,7 @@ pub async fn run(cmd: RecurrenceCmd, g: &GlobalArgs) -> Result<()> {
                 &users,
                 &field_values,
             );
-            apply_schedule(&mut body, start, all_day, false);
+            apply_schedule(&mut body, start, all_day, false, false);
             let nest = match edit_occurrence(&client, &id, at, &body).await {
                 Ok(n) => n,
                 // The route materializes before it applies the body, so a refused
