@@ -393,7 +393,7 @@ async fn schedule_write_warning_on_update_is_collected() {
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
     let mut body = serde_json::json!({});
-    nestr_cli::commands::nests::apply_schedule(&mut body, None, Some(true), false);
+    nestr_cli::commands::nests::apply_schedule(&mut body, None, Some(true), false, false);
     let data = nestr_cli::commands::nests::update_nest(&client, "n1", &body)
         .await
         .unwrap();
