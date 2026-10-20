@@ -566,28 +566,51 @@ fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
         .env("NO_COLOR", "1")
         .env_remove("NESTR_API_KEY")
         .env_remove("NESTR_PROFILE")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_READ_ONLY")
+        .env_remove("NESTR_AGENT_MODE")
         .output()
         .unwrap()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn update_clear_due_sends_due_null() {
+/// Run `nestr nests update n1 <args>` and assert the PATCH body is exactly `body`.
+async fn assert_update_sends(args: &[&str], body: serde_json::Value) {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
         .and(path("/api/nests/n1"))
-        .and(wiremock::matchers::body_json(
-            serde_json::json!({"due": null}),
-        ))
+        .and(wiremock::matchers::body_json(body))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "status":"success","data":{"_id":"n1","title":"T"}
         })))
         .expect(1)
         .mount(&server)
         .await;
-    let out = run_cli(
-        &server.uri(),
-        &["-o", "json", "nests", "update", "n1", "--clear-due"],
-    );
+    let mut argv = vec!["-o", "json", "nests", "update", "n1"];
+    argv.extend_from_slice(args);
+    let out = run_cli(&server.uri(), &argv);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "stderr: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_due_sends_due_null() {
+    assert_update_sends(&["--clear-due"], serde_json::json!({"due": null})).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_start_and_clear_due_sends_both_null() {
+    assert_update_sends(
+        &["--clear-start", "--clear-due"],
+        serde_json::json!({"start": null, "due": null}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_due_combines_with_start_and_all_day() {
+    assert_update_sends(
+        &["--start", "2026-10-05", "--all-day", "--clear-due"],
+        serde_json::json!({"start": "2026-10-05", "allDay": true, "due": null}),
+    )
+    .await;
 }
