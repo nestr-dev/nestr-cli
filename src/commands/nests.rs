@@ -462,8 +462,9 @@ pub fn update_body(
 }
 
 /// Add the schedule keys to a create/update body: `start`, `allDay`, and
-/// `start: null` / `due: null` for `--clear-start` / `--clear-due`. The server writes them through the schedule
-/// editor's own path and refuses an unreadable date with a 422.
+/// `start: null` / `due: null` for `--clear-start` / `--clear-due`. The server
+/// writes them through the schedule editor's own path and refuses an unreadable
+/// date with a 422.
 pub fn apply_schedule(
     body: &mut Value,
     start: Option<String>,
