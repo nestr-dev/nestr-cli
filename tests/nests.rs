@@ -533,11 +533,12 @@ async fn update_with_bad_start_surfaces_the_servers_422() {
     );
 }
 
-/// Run the real binary against the mock server with an api-key profile.
+/// Run the real binary against the mock server with an api-key profile. The profile
+/// is written straight into the temp dir: setting NESTR_HOME process-wide would race
+/// the other tests in this binary that do.
 fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
-    use nestr_cli::config::{save_profile, AuthKind, CredentialStorage, Profile};
+    use nestr_cli::config::{config_dir_in, AuthKind, CredentialStorage, Profile};
     let tmp = tempfile::tempdir().unwrap();
-    std::env::set_var("NESTR_HOME", tmp.path());
     let profile = Profile {
         auth: AuthKind::ApiKey,
         credential_storage: CredentialStorage::File,
@@ -551,8 +552,13 @@ fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
         client_instance_id: None,
         default_output_format: None,
     };
-    save_profile("t", &profile).unwrap();
-    std::env::remove_var("NESTR_HOME");
+    let profiles = config_dir_in(Some(tmp.path().into())).join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("t.toml"),
+        toml::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
     std::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
         .args(["--profile", "t", "--yes"])
         .args(args)
