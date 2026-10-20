@@ -169,7 +169,9 @@ A nest's schedule is `start` + `due` (+ `allDay`). `nests create` and `nests upd
   `yyyy-mm-dd` dates imply it and are all-day on UTC day edges, so they read as the same
   dates in every timezone.
 - **`--clear-start`** (update only) — drop the start, leaving `--due` as a deadline.
-- **`--clear-due`** (update only) — drop the due date (sends `due: null`).
+- **`--clear-due`** (update only) — drop the due date (sends `due: null`). On a
+  meeting, a `--start` in the same call re-derives the end from the meeting's
+  duration, so the due is not cleared.
 
 A date the server can't read, or a due before the start, comes back as a
 `validation error:` with the server's reason, and nothing is written.

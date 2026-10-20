@@ -153,7 +153,8 @@ pub enum NestsCmd {
         /// Remove the start, leaving --due as a plain deadline.
         #[arg(long, conflicts_with = "start")]
         clear_start: bool,
-        /// Remove the due date.
+        /// Remove the due date. On a meeting, a --start sent with it re-derives the
+        /// end from the meeting's duration, so the due is not cleared.
         #[arg(long, conflicts_with = "due")]
         clear_due: bool,
         /// Mark the nest done (or not).
@@ -463,8 +464,9 @@ pub fn update_body(
 
 /// Add the schedule keys to a create/update body: `start`, `allDay`, and
 /// `start: null` / `due: null` for `--clear-start` / `--clear-due`. The server
-/// writes them through the schedule editor's own path and refuses an unreadable
-/// date with a 422.
+/// writes `start`/`allDay`, and a `due` sent with them, through the schedule
+/// editor's own path and refuses an unreadable date with a 422; a `due` on its
+/// own takes the direct write.
 pub fn apply_schedule(
     body: &mut Value,
     start: Option<String>,
