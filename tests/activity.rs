@@ -243,6 +243,7 @@ async fn since_stops_at_the_page_cap_when_the_entry_never_shows() {
         .await
         .unwrap();
     assert!(!s.reached);
+    assert!(s.capped);
     assert_eq!(s.entries.len(), 3);
 }
 
@@ -276,6 +277,7 @@ async fn since_stops_when_the_list_ends() {
         .await
         .unwrap();
     assert!(!s.reached);
+    assert!(!s.capped);
     assert_eq!(ids(&s.entries), ["e2", "e1"]);
 }
 
@@ -398,36 +400,9 @@ async fn follow_exits_when_the_credential_is_rejected() {
         .respond_with(ResponseTemplate::new(401).set_body_json(json!({"message": "revoked"})))
         .mount(&server)
         .await;
-    let home = tempfile::tempdir().unwrap();
-    let profiles = home.path().join(".nestr").join("profiles");
-    std::fs::create_dir_all(&profiles).unwrap();
-    std::fs::write(
-        profiles.join("default.toml"),
-        format!(
-            "auth = \"api_key\"\ncredential_storage = \"file\"\nhost = \"{}\"\n\
-             workspace_id = \"ws1\"\napi_key = \"test-key\"\n",
-            server.uri()
-        ),
-    )
-    .unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
-        .args([
-            "nests",
-            "activity",
-            "n1",
-            "--follow",
-            "--since",
-            "e1",
-            "--interval",
-            "1",
-        ])
-        .env("NESTR_HOME", home.path())
-        .env_remove("NESTR_API_KEY")
-        .env_remove("NESTR_HOST")
-        .env_remove("NESTR_PROFILE")
+    let home = profile_home(&server);
+    let mut child = nestr(&home, &["--follow", "--since", "e1", "--interval", "1"])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
         .spawn()
         .unwrap();
     let status = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait())
@@ -505,4 +480,216 @@ async fn follow_moves_past_a_deleted_anchor_even_when_nothing_is_new() {
     assert_eq!(f.missed_anchor.take().as_deref(), Some("e3"));
     assert!(f.poll(&client).await.unwrap().is_empty());
     assert_eq!(f.missed_anchor, None);
+}
+
+// ---- the binary: exit codes, the first read, a closed pipe -----------------
+
+/// A NESTR_HOME holding a file-stored API-key profile pointed at `server`.
+fn profile_home(server: &MockServer) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let profiles = home.path().join(".nestr").join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("default.toml"),
+        format!(
+            "auth = \"api_key\"\ncredential_storage = \"file\"\nhost = \"{}\"\n\
+             workspace_id = \"ws1\"\napi_key = \"test-key\"\n",
+            server.uri()
+        ),
+    )
+    .unwrap();
+    home
+}
+
+/// `nestr nests activity n1 <args>` with that profile; stderr piped.
+fn nestr(home: &tempfile::TempDir, args: &[&str]) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_nestr"));
+    cmd.args(["nests", "activity", "n1"])
+        .args(args)
+        .env("NESTR_HOME", home.path())
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_PROFILE")
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    cmd
+}
+
+/// Every call answers `[e{n+1}, e{n}]` for the n-th call, so each poll finds its
+/// anchor and has exactly one new entry. Paths are under `/api`.
+struct OneNewPerCall(std::sync::atomic::AtomicUsize);
+
+impl wiremock::Respond for OneNewPerCall {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u32;
+        dated_page(&[(&format!("e{}", n + 1), n + 1), (&format!("e{n}"), n)])
+    }
+}
+
+/// Pages that never end: the n-th call answers `[x{n}]` with a fresh cursor.
+struct Endless(std::sync::atomic::AtomicUsize);
+
+impl wiremock::Respond for Endless {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        page(&[&format!("x{n}")], Some(&format!("c{n}")))
+    }
+}
+
+async fn output_of(mut cmd: tokio::process::Command) -> std::process::Output {
+    cmd.stdout(std::process::Stdio::piped());
+    tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output())
+        .await
+        .expect("nestr did not finish")
+        .unwrap()
+}
+
+#[tokio::test]
+async fn since_a_missing_entry_prints_nothing_and_exits_4() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(page(&["e2", "e1"], None))
+        .mount(&server)
+        .await;
+    let home = profile_home(&server);
+    let out = output_of(nestr(&home, &["--since", "gone", "-o", "json"])).await;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(activity::EXIT_ANCHOR_NOT_FOUND));
+    assert_eq!(activity::EXIT_ANCHOR_NOT_FOUND, 4);
+    assert!(out.stdout.is_empty(), "printed: {:?}", out.stdout);
+    assert!(
+        stderr.contains("'gone' is not in this nest's activity"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("pages"), "{stderr}");
+}
+
+#[tokio::test]
+async fn since_beyond_the_page_cap_says_so_and_exits_4() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(Endless(Default::default()))
+        .mount(&server)
+        .await;
+    let home = profile_home(&server);
+    let out = output_of(nestr(
+        &home,
+        &["--since", "gone", "--limit", "1", "-o", "json"],
+    ))
+    .await;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(4));
+    assert!(out.stdout.is_empty());
+    assert!(
+        stderr.contains("not found in the newest 20 pages"),
+        "{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn follow_from_a_since_entry_that_is_gone_exits_4() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(page(&["e2", "e1"], None))
+        .mount(&server)
+        .await;
+    let home = profile_home(&server);
+    let out = output_of(nestr(
+        &home,
+        &["--follow", "--since", "gone", "--interval", "1"],
+    ))
+    .await;
+    assert_eq!(out.status.code(), Some(4));
+    assert!(out.stdout.is_empty());
+}
+
+#[tokio::test]
+async fn a_since_miss_is_not_retried() {
+    let server = MockServer::start().await;
+    once(&server, page(&["e2", "e1"], None)).await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), Some("gone".into()))
+        .await
+        .unwrap();
+    let err = f.poll(&client).await.unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::AnchorNotFound(_)),
+        "{err:?}"
+    );
+    assert!(!activity::is_transient(&err));
+}
+
+#[tokio::test]
+async fn follow_retries_a_failed_first_read() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(ResponseTemplate::new(503).set_body_json(json!({"message": "deploying"})))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(OneNewPerCall(Default::default()))
+        .mount(&server)
+        .await;
+    let home = profile_home(&server);
+    let mut child = nestr(&home, &["--follow", "--interval", "1"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(stdout));
+    let first = tokio::time::timeout(std::time::Duration::from_secs(20), lines.next_line())
+        .await
+        .expect("--follow gave up after a failed first read")
+        .unwrap()
+        .expect("--follow exited after a failed first read");
+    assert!(first.contains("\"id\":\"e2\""), "{first}");
+}
+
+#[tokio::test]
+async fn follow_exits_quietly_when_stdout_closes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(OneNewPerCall(Default::default()))
+        .mount(&server)
+        .await;
+    let home = profile_home(&server);
+    let mut child = nestr(&home, &["--follow", "--interval", "1"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(stdout));
+    tokio::time::timeout(std::time::Duration::from_secs(20), lines.next_line())
+        .await
+        .expect("no first line")
+        .unwrap();
+    // The consumer goes away; the next entry hits a closed pipe.
+    drop(lines);
+    let out = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait_with_output())
+        .await
+        .expect("--follow kept running after stdout closed")
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "{stderr}");
+}
+
+#[test]
+fn backoff_doubles_after_each_failure_up_to_a_cap() {
+    use std::time::Duration;
+    let s = Duration::from_secs;
+    assert_eq!(activity::backoff(s(120), 0), s(120));
+    assert_eq!(activity::backoff(s(120), 1), s(240));
+    assert_eq!(activity::backoff(s(120), 2), s(480));
+    assert_eq!(activity::backoff(s(120), 3), s(600));
+    assert_eq!(activity::backoff(s(120), 40), s(600));
+    // An interval above the cap is never shortened.
+    assert_eq!(activity::backoff(s(900), 3), s(900));
 }

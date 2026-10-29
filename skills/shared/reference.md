@@ -25,7 +25,9 @@ sit side by side. Credentials live in the OS keyring or a `0600` file.
 ## Global flags
 
 - `-p, --profile <name>` — pick a profile for this invocation.
-- `--api-key <key>` / `--host <url>` — override the profile's credential / host.
+- `--api-key <key>` / `--host <url>` — override the profile's credential / host. Never pass
+  `--api-key` on a command line: it shows in shell history and `ps`. Use a profile, or
+  `NESTR_API_KEY` for a one-off.
 - `-w, --workspace <id>` — act on a specific workspace, overriding the profile's (for full-account profiles).
 - `-o, --output text|json` — `text` (tables) or `json` (raw, for `jq`).
 - `--yes` — skip destructive-action confirmations (required for agents/scripts).

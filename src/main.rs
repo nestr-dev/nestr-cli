@@ -274,7 +274,13 @@ async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     if let Err(e) = run().await {
         eprintln!("Error: {e:#}");
-        std::process::exit(1);
+        let code = match e.downcast_ref::<nestr_cli::error::NestrError>() {
+            Some(nestr_cli::error::NestrError::AnchorNotFound(_)) => {
+                nestr_cli::commands::activity::EXIT_ANCHOR_NOT_FOUND
+            }
+            _ => 1,
+        };
+        std::process::exit(code);
     }
 }
 

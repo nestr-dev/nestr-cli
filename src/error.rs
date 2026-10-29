@@ -17,6 +17,10 @@ pub enum NestrError {
     Validation(String),
     #[error("plan required: {0}")]
     PlanRequired(String),
+    /// `nests activity --since`: the entry to read back to was not found. The CLI
+    /// exits with its own code for it (`activity::EXIT_ANCHOR_NOT_FOUND`).
+    #[error("{0}")]
+    AnchorNotFound(String),
     #[error("API error ({status}): {message}")]
     Api { status: u16, message: String },
     #[error(transparent)]

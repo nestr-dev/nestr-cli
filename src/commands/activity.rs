@@ -130,6 +130,14 @@ pub const SINCE_PAGE_CAP: usize = 20;
 pub const PAGING_PAGE_SIZE: u32 = 200;
 /// How many printed entry ids `--follow` remembers to avoid printing one twice.
 const SEEN_CAP: usize = 5000;
+/// Exit code when the `--since` entry is not in the nest's activity (deleted,
+/// outside `--depth`, or beyond the page cap). 1 is every other error and 2 is a
+/// usage error, so a caller can tell this one apart and start again without
+/// `--since`.
+pub const EXIT_ANCHOR_NOT_FOUND: i32 = 4;
+/// The longest `--follow` waits between attempts while polls keep failing
+/// (unless `--interval` is longer).
+pub const BACKOFF_CAP: Duration = Duration::from_secs(600);
 
 #[derive(Args)]
 pub struct NestActivityArgs {
@@ -145,14 +153,17 @@ pub struct NestActivityArgs {
     pub depth: Option<String>,
     /// Only the entries newer than this entry id. Pages back through the API's
     /// `links.next` until it reaches that entry (at most 20 pages), so a burst larger
-    /// than one page is not lost.
+    /// than one page is not lost. If the entry is not found (deleted, outside
+    /// --depth, or beyond 20 pages), nothing is printed and the exit code is 4.
     #[arg(long, value_name = "ENTRY_ID")]
     pub since: Option<String>,
     /// Keep polling, and print each new entry to stdout as one JSON line, oldest
     /// first. Starts after --since when given, otherwise after the newest entry at
     /// start (which is not printed). A failed poll is reported on stderr and retried
-    /// on the next interval; no entry is lost or printed twice. A rejected login, a
-    /// refused right or a missing nest ends it with the error instead.
+    /// on the next interval, waiting longer after each failure (up to 10 minutes);
+    /// no entry is lost or printed twice. A rejected login, a refused right or a
+    /// missing nest ends it with the error instead, and a --since entry that is not
+    /// found ends it with exit code 4. It exits quietly when stdout is closed.
     #[arg(long)]
     pub follow: bool,
     /// Seconds between polls with --follow.
@@ -247,14 +258,36 @@ pub async fn fetch_nest_page(
 }
 
 /// The entries newer than a given entry, newest first. `reached` is false when the
-/// entry was not found before the list ended or the page cap was hit; `entries` then
-/// holds everything read. `anchor_date` is the `date` of the `since` entry when it
-/// was reached.
+/// entry was not found; `entries` then holds everything read, and `capped` says
+/// whether the page cap stopped the read (otherwise the list ended). `anchor_date`
+/// is the `date` of the `since` entry when it was reached.
 #[derive(Debug, Clone)]
 pub struct Since {
     pub entries: Vec<Value>,
     pub reached: bool,
+    pub capped: bool,
     pub anchor_date: Option<String>,
+}
+
+impl Since {
+    /// The error for a `since` entry that was not found, saying why.
+    pub fn miss(&self, since: &str) -> NestrError {
+        let since = render::sanitize(since);
+        let n = self.entries.len();
+        NestrError::AnchorNotFound(if self.capped {
+            format!(
+                "entry '{since}' was not found in the newest {SINCE_PAGE_CAP} pages of this \
+                 nest's activity ({n} entries). Nothing was printed; read it again without \
+                 --since."
+            )
+        } else {
+            format!(
+                "entry '{since}' is not in this nest's activity ({n} entries, back to the \
+                 oldest): it was deleted, or is outside --depth. Nothing was printed; read it \
+                 again without --since."
+            )
+        })
+    }
 }
 
 /// Read pages, newest first, until the entry `since` turns up, following the
@@ -268,6 +301,7 @@ pub async fn fetch_nest_since(
 ) -> crate::error::Result<Since> {
     let mut entries = Vec::new();
     let mut before: Option<String> = None;
+    let mut ended = false;
     for _ in 0..max_pages.max(1) {
         let page = fetch_nest_page(client, id, q, before.as_deref()).await?;
         for e in page.entries {
@@ -275,6 +309,7 @@ pub async fn fetch_nest_since(
                 return Ok(Since {
                     entries,
                     reached: true,
+                    capped: false,
                     anchor_date: entry_date(&e).map(str::to_string),
                 });
             }
@@ -282,12 +317,16 @@ pub async fn fetch_nest_since(
         }
         match page.next {
             Some(c) if before.as_deref() != Some(c.as_str()) => before = Some(c),
-            _ => break,
+            _ => {
+                ended = true;
+                break;
+            }
         }
     }
     Ok(Since {
         entries,
         reached: false,
+        capped: !ended,
         anchor_date: None,
     })
 }
@@ -326,8 +365,9 @@ pub struct Follower {
     /// older than it are history from before this point, not news.
     anchor_date: Option<String>,
     seen: Seen,
-    /// Set by a poll that did not find its anchor (deleted, or more than
-    /// [`SINCE_PAGE_CAP`] pages back); the caller reports it.
+    /// Set by a poll that did not find its anchor because it was deleted after
+    /// this run saw it; the caller reports it. (A `--since` entry never seen is
+    /// an error instead.)
     pub missed_anchor: Option<String>,
 }
 
@@ -378,6 +418,10 @@ impl Follower {
                     if self.anchor_date.is_none() {
                         self.anchor_date = s.anchor_date;
                     }
+                } else if self.anchor_date.is_none() {
+                    // A --since entry this run has never seen: there is no date
+                    // to tell news from history, so stop rather than guess.
+                    return Err(s.miss(a));
                 } else {
                     self.missed_anchor = Some(a.clone());
                     // Wait after the newest entry read from now on, even if none of
@@ -439,7 +483,7 @@ pub async fn run_nest(
         Some(since) => {
             let s = fetch_nest_since(client, &args.id, &q, since, SINCE_PAGE_CAP).await?;
             if !s.reached {
-                warn_missed(since);
+                return Err(s.miss(since).into());
             }
             s.entries
         }
@@ -452,12 +496,14 @@ pub async fn run_nest(
     Ok(())
 }
 
-fn warn_missed(since: &str) {
-    eprintln!(
-        "warning: entry '{}' was not found within {SINCE_PAGE_CAP} pages of this nest's \
-         activity; showing every entry read",
-        render::sanitize(since)
-    );
+/// How long `--follow` waits before the next attempt after `failures` failed
+/// ones in a row: the interval, doubled per failure, capped at [`BACKOFF_CAP`]
+/// (or the interval itself, when that is longer).
+pub fn backoff(interval: Duration, failures: u32) -> Duration {
+    let factor = 1u32 << failures.min(16);
+    interval
+        .saturating_mul(factor)
+        .min(BACKOFF_CAP.max(interval))
 }
 
 /// Whether `--follow` should retry after this error. A server error, a rate limit
@@ -480,29 +526,65 @@ async fn follow(
 ) -> Result<()> {
     // From --since, the first poll runs at once; from "now" there is nothing to
     // read until the first interval has passed.
-    let mut wait = since.is_none();
-    let mut f = Follower::start(client, id, q, since).await?;
-    loop {
-        if wait {
-            tokio::time::sleep(interval).await;
+    let mut wait = if since.is_some() {
+        Duration::ZERO
+    } else {
+        interval
+    };
+    let mut failures = 0u32;
+    let mut f = loop {
+        match Follower::start(client, id, q.clone(), since.clone()).await {
+            Ok(f) => break f,
+            Err(e) if is_transient(&e) => {
+                failures += 1;
+                let next = backoff(interval, failures);
+                eprintln!(
+                    "nestr: reading activity failed, retrying in {}s: {e}",
+                    next.as_secs()
+                );
+                tokio::time::sleep(next).await;
+            }
+            Err(e) => return Err(e.into()),
         }
-        wait = true;
+    };
+    failures = 0;
+    loop {
+        tokio::time::sleep(wait).await;
         match f.poll(client).await {
             Ok(entries) => {
+                failures = 0;
+                wait = interval;
                 if let Some(a) = f.missed_anchor.take() {
-                    warn_missed(&a);
+                    eprintln!(
+                        "nestr: entry '{}' is gone; continuing after the newest entry",
+                        render::sanitize(&a)
+                    );
                 }
-                let mut out = std::io::stdout().lock();
-                for e in &entries {
-                    writeln!(out, "{}", serde_json::to_string(e)?)?;
+                match write_lines(&entries) {
+                    Ok(()) => {}
+                    // The reader went away (`| head`, a stopped monitor): done.
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+                    Err(e) => return Err(e.into()),
                 }
-                out.flush()?;
             }
-            Err(e) if is_transient(&e) => eprintln!(
-                "nestr: polling activity failed, retrying in {}s: {e}",
-                interval.as_secs()
-            ),
+            Err(e) if is_transient(&e) => {
+                failures += 1;
+                wait = backoff(interval, failures);
+                eprintln!(
+                    "nestr: polling activity failed, retrying in {}s: {e}",
+                    wait.as_secs()
+                );
+            }
             Err(e) => return Err(e.into()),
         }
     }
+}
+
+/// One compact JSON line per entry on stdout, flushed.
+fn write_lines(entries: &[Value]) -> std::io::Result<()> {
+    let mut out = std::io::stdout().lock();
+    for e in entries {
+        writeln!(out, "{}", serde_json::to_string(e)?)?;
+    }
+    out.flush()
 }
