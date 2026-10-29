@@ -436,3 +436,73 @@ async fn follow_exits_when_the_credential_is_rejected() {
         .unwrap();
     assert!(!status.success());
 }
+
+/// A page whose rows carry their own minute, so entries have distinct dates.
+fn dated_page(rows: &[(&str, u32)]) -> ResponseTemplate {
+    let data: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(id, min)| {
+            let mut r = row(id);
+            r["date"] = json!(format!("2026-10-29T09:{min:02}:00.000Z"));
+            r
+        })
+        .collect();
+    ResponseTemplate::new(200).set_body_json(json!({
+        "status": "success", "data": data, "meta": {"has_more": false}, "links": {}
+    }))
+}
+
+#[tokio::test]
+async fn follow_never_prints_history_from_before_it_started() {
+    let server = MockServer::start().await;
+    once(&server, dated_page(&[("e3", 3)])).await;
+    // The baseline e3 was deleted before anything new arrived: the poll falls
+    // back to everything it read, but e2 and e1 are older than the start.
+    once(
+        &server,
+        dated_page(&[("e5", 5), ("e4", 4), ("e2", 2), ("e1", 1)]),
+    )
+    .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), None)
+        .await
+        .unwrap();
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e4", "e5"]);
+    assert_eq!(f.missed_anchor.as_deref(), Some("e3"));
+}
+
+#[tokio::test]
+async fn follow_from_since_learns_the_anchor_date_once_it_sees_it() {
+    let server = MockServer::start().await;
+    // --since e3: the first poll finds it with nothing newer.
+    once(&server, dated_page(&[("e3", 3), ("e2", 2)])).await;
+    // Then e3 is deleted; e2 is older than it and must stay unprinted.
+    once(&server, dated_page(&[("e4", 4), ("e2", 2)])).await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), Some("e3".into()))
+        .await
+        .unwrap();
+    assert!(f.poll(&client).await.unwrap().is_empty());
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e4"]);
+}
+
+#[tokio::test]
+async fn follow_moves_past_a_deleted_anchor_even_when_nothing_is_new() {
+    let server = MockServer::start().await;
+    once(&server, dated_page(&[("e3", 3)])).await;
+    once(&server, dated_page(&[("e2", 2), ("e1", 1)])).await;
+    // The next poll must look for e2 now, and find it, instead of missing e3 again.
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .respond_with(dated_page(&[("e2", 2), ("e1", 1)]))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), None)
+        .await
+        .unwrap();
+    assert!(f.poll(&client).await.unwrap().is_empty());
+    assert_eq!(f.missed_anchor.take().as_deref(), Some("e3"));
+    assert!(f.poll(&client).await.unwrap().is_empty());
+    assert_eq!(f.missed_anchor, None);
+}

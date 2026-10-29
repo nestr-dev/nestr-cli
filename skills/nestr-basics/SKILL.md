@@ -230,6 +230,7 @@ nestr nests activity <id> --follow --interval 60   # poll; one JSON line per new
   on stderr and the next poll covers the same span, so nothing is lost or printed twice.
   A rejected login, a refused right or a missing nest is not retried: it exits non-zero
   with the error.
+  If the entry it is waiting after is deleted, entries older than it are not printed.
   `--interval` defaults to 120 seconds.
 - With `--since` or `--follow`, `--limit` is the page size used while paging back
   (default 200, the API maximum). Filter by user or type with `jq`.

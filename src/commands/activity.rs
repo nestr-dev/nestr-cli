@@ -200,6 +200,10 @@ fn entry_id(entry: &Value) -> Option<&str> {
     entry.get("id").and_then(Value::as_str)
 }
 
+fn entry_date(entry: &Value) -> Option<&str> {
+    entry.get("date").and_then(Value::as_str)
+}
+
 pub async fn fetch_nest_page(
     client: &NestrClient,
     id: &str,
@@ -244,11 +248,13 @@ pub async fn fetch_nest_page(
 
 /// The entries newer than a given entry, newest first. `reached` is false when the
 /// entry was not found before the list ended or the page cap was hit; `entries` then
-/// holds everything read.
+/// holds everything read. `anchor_date` is the `date` of the `since` entry when it
+/// was reached.
 #[derive(Debug, Clone)]
 pub struct Since {
     pub entries: Vec<Value>,
     pub reached: bool,
+    pub anchor_date: Option<String>,
 }
 
 /// Read pages, newest first, until the entry `since` turns up, following the
@@ -269,6 +275,7 @@ pub async fn fetch_nest_since(
                 return Ok(Since {
                     entries,
                     reached: true,
+                    anchor_date: entry_date(&e).map(str::to_string),
                 });
             }
             entries.push(e);
@@ -281,6 +288,7 @@ pub async fn fetch_nest_since(
     Ok(Since {
         entries,
         reached: false,
+        anchor_date: None,
     })
 }
 
@@ -314,6 +322,9 @@ pub struct Follower {
     id: String,
     q: NestActivityQuery,
     anchor: Option<String>,
+    /// The anchor's `date`, once known. When the anchor goes missing, entries
+    /// older than it are history from before this point, not news.
+    anchor_date: Option<String>,
     seen: Seen,
     /// Set by a poll that did not find its anchor (deleted, or more than
     /// [`SINCE_PAGE_CAP`] pages back); the caller reports it.
@@ -328,19 +339,19 @@ impl Follower {
         q: NestActivityQuery,
         since: Option<String>,
     ) -> crate::error::Result<Self> {
-        let anchor = match since {
-            Some(s) => Some(s),
+        let (anchor, anchor_date) = match since {
+            Some(s) => (Some(s), None),
             None => {
                 let newest = NestActivityQuery {
                     limit: Some(1),
                     depth: q.depth.clone(),
                 };
-                fetch_nest_page(client, id, &newest, None)
-                    .await?
-                    .entries
-                    .first()
-                    .and_then(entry_id)
-                    .map(str::to_string)
+                let page = fetch_nest_page(client, id, &newest, None).await?;
+                let first = page.entries.first();
+                (
+                    first.and_then(entry_id).map(str::to_string),
+                    first.and_then(entry_date).map(str::to_string),
+                )
             }
         };
         let mut seen = Seen::default();
@@ -351,6 +362,7 @@ impl Follower {
             id: id.to_string(),
             q,
             anchor,
+            anchor_date,
             seen,
             missed_anchor: None,
         })
@@ -361,9 +373,25 @@ impl Follower {
     pub async fn poll(&mut self, client: &NestrClient) -> crate::error::Result<Vec<Value>> {
         let entries = match &self.anchor {
             Some(a) => {
-                let s = fetch_nest_since(client, &self.id, &self.q, a, SINCE_PAGE_CAP).await?;
-                if !s.reached {
+                let mut s = fetch_nest_since(client, &self.id, &self.q, a, SINCE_PAGE_CAP).await?;
+                if s.reached {
+                    if self.anchor_date.is_none() {
+                        self.anchor_date = s.anchor_date;
+                    }
+                } else {
                     self.missed_anchor = Some(a.clone());
+                    // Wait after the newest entry read from now on, even if none of
+                    // it is printed, so the next poll does not miss the same anchor.
+                    if let Some(newest) = s.entries.iter().find(|e| entry_id(e).is_some()) {
+                        self.anchor = entry_id(newest).map(str::to_string);
+                    }
+                    // ISO 8601 UTC strings from one API compare in time order. An
+                    // entry at the anchor's own instant is kept: the seen set stops
+                    // a repeat, and dropping it could lose a real new entry.
+                    if let Some(d) = self.anchor_date.clone() {
+                        s.entries
+                            .retain(|e| entry_date(e).is_none_or(|x| x >= d.as_str()));
+                    }
                 }
                 s.entries
             }
@@ -374,8 +402,9 @@ impl Follower {
                     .entries
             }
         };
-        if let Some(newest) = entries.iter().find_map(entry_id) {
-            self.anchor = Some(newest.to_string());
+        if let Some(newest) = entries.iter().find(|e| entry_id(e).is_some()) {
+            self.anchor = entry_id(newest).map(str::to_string);
+            self.anchor_date = entry_date(newest).map(str::to_string);
         }
         Ok(entries
             .into_iter()
