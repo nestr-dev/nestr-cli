@@ -80,3 +80,288 @@ fn a_row_says_what_happened() {
     let plain = json!({"type": "comment", "description": "<p>commented on it</p>"});
     assert_eq!(activity::what(&plain), "commented on it");
 }
+
+// ---- nest activity: GET /nests/:id/activity --------------------------------
+
+use activity::{Follower, NestActivityQuery};
+use wiremock::matchers::query_param_is_missing;
+
+fn row(id: &str) -> serde_json::Value {
+    json!({"id": id, "date": "2026-10-29T09:00:00.000Z", "type": "change", "userId": "u1",
+           "nestId": "n1", "nestTitle": "Review", "description": "changed it", "changes": []})
+}
+
+/// One page of the list envelope; `next` is the cursor carried on `links.next`.
+fn page(ids: &[&str], next: Option<&str>) -> ResponseTemplate {
+    let mut body = json!({
+        "status": "success",
+        "data": ids.iter().map(|i| row(i)).collect::<Vec<_>>(),
+        "meta": {"has_more": next.is_some()},
+        "links": {}
+    });
+    if let Some(c) = next {
+        body["links"]["next"] = json!(format!(
+            "https://app.nestr.io/api/nests/n1/activity?limit=2&before={c}"
+        ));
+    }
+    ResponseTemplate::new(200).set_body_json(body)
+}
+
+fn ids(entries: &[serde_json::Value]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn q(limit: Option<u32>, depth: Option<&str>) -> NestActivityQuery {
+    NestActivityQuery {
+        limit,
+        depth: depth.map(str::to_string),
+    }
+}
+
+#[tokio::test]
+async fn nest_activity_passes_limit_and_depth_and_reads_the_cursor() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("limit", "5"))
+        .and(query_param("depth", "all"))
+        .and(query_param_is_missing("before"))
+        .respond_with(page(&["e2", "e1"], Some("c1")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let p = activity::fetch_nest_page(&client, "n1", &q(Some(5), Some("all")), None)
+        .await
+        .unwrap();
+    assert_eq!(ids(&p.entries), ["e2", "e1"]);
+    assert_eq!(p.entries[0]["nestTitle"], "Review");
+    assert_eq!(p.next.as_deref(), Some("c1"));
+}
+
+#[tokio::test]
+async fn nest_activity_without_more_pages_has_no_cursor() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("before", "c9"))
+        .and(query_param("depth", "2"))
+        .respond_with(page(&["e1"], None))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let p = activity::fetch_nest_page(&client, "n1", &q(None, Some("2")), Some("c9"))
+        .await
+        .unwrap();
+    assert_eq!(ids(&p.entries), ["e1"]);
+    assert_eq!(p.next, None);
+}
+
+#[tokio::test]
+async fn since_follows_next_pages_until_it_reaches_the_entry() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param_is_missing("before"))
+        .respond_with(page(&["e6", "e5"], Some("c1")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("before", "c1"))
+        .respond_with(page(&["e4", "e3"], Some("c2")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("before", "c2"))
+        .respond_with(page(&["e2", "e1"], Some("c3")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The entry is on page three, so page four is never asked for.
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("before", "c3"))
+        .respond_with(page(&["e0"], None))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let s = activity::fetch_nest_since(&client, "n1", &q(Some(2), None), "e2", 20)
+        .await
+        .unwrap();
+    assert!(s.reached);
+    assert_eq!(ids(&s.entries), ["e6", "e5", "e4", "e3"]);
+}
+
+#[tokio::test]
+async fn since_the_newest_entry_is_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .respond_with(page(&["e2", "e1"], Some("c1")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let s = activity::fetch_nest_since(&client, "n1", &q(None, None), "e2", 20)
+        .await
+        .unwrap();
+    assert!(s.reached);
+    assert!(s.entries.is_empty());
+}
+
+#[tokio::test]
+async fn since_stops_at_the_page_cap_when_the_entry_never_shows() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param_is_missing("before"))
+        .respond_with(page(&["x1"], Some("c1")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (before, id, next) in [("c1", "x2", "c2"), ("c2", "x3", "c3"), ("c3", "x4", "c4")] {
+        Mock::given(method("GET"))
+            .and(path("/nests/n1/activity"))
+            .and(query_param("before", before))
+            .respond_with(page(&[id], Some(next)))
+            // Three pages are the cap: the fourth is never asked for.
+            .expect(u64::from(before != "c3"))
+            .mount(&server)
+            .await;
+    }
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let s = activity::fetch_nest_since(&client, "n1", &q(None, None), "gone", 3)
+        .await
+        .unwrap();
+    assert!(!s.reached);
+    assert_eq!(s.entries.len(), 3);
+}
+
+#[tokio::test]
+async fn since_stops_when_the_server_repeats_a_cursor() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .respond_with(page(&["x"], Some("again")))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let s = activity::fetch_nest_since(&client, "n1", &q(None, None), "gone", 20)
+        .await
+        .unwrap();
+    assert!(!s.reached);
+}
+
+#[tokio::test]
+async fn since_stops_when_the_list_ends() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .respond_with(page(&["e2", "e1"], None))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let s = activity::fetch_nest_since(&client, "n1", &q(None, None), "gone", 20)
+        .await
+        .unwrap();
+    assert!(!s.reached);
+    assert_eq!(ids(&s.entries), ["e2", "e1"]);
+}
+
+/// Mount a one-shot response; wiremock picks the first mounted mock that still
+/// matches, so a stack of these plays back in order.
+async fn once(server: &MockServer, resp: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .respond_with(resp)
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn follow_starts_after_the_newest_entry_and_never_repeats_one() {
+    let server = MockServer::start().await;
+    // Baseline at start: the newest entry, which is not printed.
+    Mock::given(method("GET"))
+        .and(path("/nests/n1/activity"))
+        .and(query_param("limit", "1"))
+        .respond_with(page(&["e1"], Some("b")))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    once(&server, page(&["e3", "e2", "e1"], None)).await;
+    once(&server, page(&["e3", "e2", "e1"], None)).await;
+    // e3 vanished (deleted), so the anchor is not found: e2 and e1 come back
+    // again and must not be printed a second time.
+    once(&server, page(&["e4", "e2", "e1"], None)).await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), None)
+        .await
+        .unwrap();
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e2", "e3"]);
+    assert!(f.poll(&client).await.unwrap().is_empty());
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e4"]);
+}
+
+#[tokio::test]
+async fn follow_from_since_pages_back_and_prints_oldest_first() {
+    let server = MockServer::start().await;
+    once(&server, page(&["e5", "e4"], Some("c1"))).await;
+    once(&server, page(&["e3", "e2"], Some("c2"))).await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(Some(2), None), Some("e2".into()))
+        .await
+        .unwrap();
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e3", "e4", "e5"]);
+}
+
+#[tokio::test]
+async fn follow_retries_a_failed_poll_without_losing_entries() {
+    let server = MockServer::start().await;
+    once(&server, page(&["e1"], None)).await;
+    once(&server, ResponseTemplate::new(500).set_body_string("boom")).await;
+    once(&server, page(&["e3", "e2", "e1"], None)).await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let mut f = Follower::start(&client, "n1", q(None, None), None)
+        .await
+        .unwrap();
+    assert!(f.poll(&client).await.is_err());
+    assert_eq!(ids(&f.poll(&client).await.unwrap()), ["e2", "e3"]);
+}
+
+#[test]
+fn depth_is_a_number_or_all() {
+    assert_eq!(activity::parse_depth("all").unwrap(), "all");
+    assert_eq!(activity::parse_depth("0").unwrap(), "0");
+    assert_eq!(activity::parse_depth("3").unwrap(), "3");
+    assert!(activity::parse_depth("-1").is_err());
+    assert!(activity::parse_depth("deep").is_err());
+}
+
+#[test]
+fn the_cursor_is_read_from_the_next_link() {
+    assert_eq!(
+        activity::cursor_from_next("https://h/api/nests/n1/activity?limit=2&before=abc%3D%3D")
+            .as_deref(),
+        Some("abc==")
+    );
+    assert_eq!(
+        activity::cursor_from_next("https://h/api/nests/n1/activity"),
+        None
+    );
+    assert_eq!(activity::cursor_from_next("not a url"), None);
+}

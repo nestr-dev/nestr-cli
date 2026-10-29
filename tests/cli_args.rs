@@ -182,3 +182,36 @@ fn nests_update_clear_due_conflicts_with_due() {
         "expected a clap conflict error, got: {stderr}"
     );
 }
+
+#[test]
+fn nests_activity_depth_is_a_number_or_all() {
+    let out = run(&["nests", "activity", "n1", "--depth", "deep"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("invalid value"),
+        "expected a clap value error, got: {stderr}"
+    );
+}
+
+#[test]
+fn nests_activity_interval_needs_follow() {
+    let out = run(&["nests", "activity", "n1", "--interval", "30"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("--follow"),
+        "expected a clap requires error, got: {stderr}"
+    );
+}
+
+#[test]
+fn nests_activity_limit_is_capped_at_200() {
+    let out = run(&["nests", "activity", "n1", "--limit", "201"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("invalid value"),
+        "expected a clap range error, got: {stderr}"
+    );
+}

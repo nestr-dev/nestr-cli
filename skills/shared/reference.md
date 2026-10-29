@@ -53,7 +53,7 @@ workspace-scoped command with no active workspace errors with guidance to run
   `webhooks`, `workspaces apps`, `workspaces docs`, `nests bulk-reorder`, `connectors`,
   `agents` (except `agents mode`), and `hints` with no nest id.
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
-  `nests files`, `comments`, `inbox`, `plan`, `notifications`, `dm`, `queues`, `tensions`,
+  `nests files`, `nests activity`, `comments`, `inbox`, `plan`, `notifications`, `dm`, `queues`, `tensions`,
   `links`, `activity`, `me`, `auth`, `profiles`, `workspaces list`/`get`/`use`/`create`,
   `agents mode`.
 
@@ -260,7 +260,7 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 |---|---|---|
 | `auth`, `profiles`, `me` | authenticate, switch profiles, identity | this reference |
 | `search` | find nests across a workspace or subtree | nestr-basics |
-| `nests` | read/create/update/delete/reorder nests + labels, dates, recurrence; `nests files` attachments | nestr-basics |
+| `nests` | read/create/update/delete/reorder nests + labels, dates, recurrence; `nests files` attachments; `nests activity` (read or follow a nest's activity) | nestr-basics |
 | `comments` | discuss on a nest | nestr-basics |
 | `inbox`, `plan`, `work`, `activity` | capture, plan the day, open work, recent activity | nestr-basics |
 | `notifications`, `labels`, `projects` | stay current, labels, projects | nestr-basics |

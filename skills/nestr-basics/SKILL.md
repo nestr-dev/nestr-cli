@@ -205,6 +205,33 @@ nestr activity --user <userId>           # a colleague's (or an agent's) activit
 report on. An OAuth login granted for a workspace only gets a "single user scoped
 access" error: run `nestr auth login` again and grant access to your own user account.
 
+### A nest's activity
+
+`nests activity` reads what happened on a nest and everything beneath it, newest first:
+the same entries as the Activity tab, with `id`, `date`, `type`, `userId`, `nestId`,
+`nestTitle`, `description` and `changes` (each changed field before and after). It works
+with a workspace API key as well as an OAuth login.
+
+```bash
+nestr nests activity <id>                          # table, newest first
+nestr nests activity <id> --limit 1 -o json        # the newest entry, as a one-element JSON array
+nestr nests activity <id> --depth 0                # the nest itself only (N levels, or all)
+nestr nests activity <id> --since <entryId> -o json   # only what is newer than that entry
+nestr nests activity <id> --follow --interval 60   # poll; one JSON line per new entry
+```
+
+- `--since <entryId>` pages back through the API's cursor (`links.next`) until it reaches
+  that entry, at most 20 pages, so a burst bigger than one page is not cut off. If the entry
+  is not found (deleted, outside `--depth`, or further back), a warning goes to stderr and
+  every entry read is returned.
+- `--follow` never ends on its own (Ctrl-C to stop). It prints each new entry to stdout as
+  one JSON line, oldest first, whatever `-o` says. It starts after `--since` when given,
+  otherwise after the newest entry at start, which is not printed. A failed poll is reported
+  on stderr and the next poll covers the same span, so nothing is lost or printed twice.
+  `--interval` defaults to 120 seconds.
+- With `--since` or `--follow`, `--limit` is the page size used while paging back
+  (default 200, the API maximum). Filter by user or type with `jq`.
+
 ## Safety
 
 Destructive commands (`nests delete`, `nests recurrence skip`/`delete-series`, `comments delete`, `nests files delete`) ask for confirmation;
