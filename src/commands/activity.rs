@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
 use crate::config::{OutputFormat, ResolvedConfig};
+use crate::error::NestrError;
 use crate::render::{self, print_json};
 
 #[derive(Args)]
@@ -150,7 +151,8 @@ pub struct NestActivityArgs {
     /// Keep polling, and print each new entry to stdout as one JSON line, oldest
     /// first. Starts after --since when given, otherwise after the newest entry at
     /// start (which is not printed). A failed poll is reported on stderr and retried
-    /// on the next interval; no entry is lost or printed twice.
+    /// on the next interval; no entry is lost or printed twice. A rejected login, a
+    /// refused right or a missing nest ends it with the error instead.
     #[arg(long)]
     pub follow: bool,
     /// Seconds between polls with --follow.
@@ -429,6 +431,17 @@ fn warn_missed(since: &str) {
     );
 }
 
+/// Whether `--follow` should retry after this error. A server error, a rate limit
+/// or a network failure can clear by the next interval; a rejected credential, a
+/// refused right, a missing nest or a bad request cannot, so those end the follow
+/// with the error and a non-zero exit, where a supervising script can see it.
+pub fn is_transient(e: &NestrError) -> bool {
+    matches!(
+        e,
+        NestrError::Api { .. } | NestrError::Http(_) | NestrError::Json(_) | NestrError::Io(_)
+    )
+}
+
 async fn follow(
     client: &NestrClient,
     id: &str,
@@ -456,10 +469,11 @@ async fn follow(
                 }
                 out.flush()?;
             }
-            Err(e) => eprintln!(
+            Err(e) if is_transient(&e) => eprintln!(
                 "nestr: polling activity failed, retrying in {}s: {e}",
                 interval.as_secs()
             ),
+            Err(e) => return Err(e.into()),
         }
     }
 }

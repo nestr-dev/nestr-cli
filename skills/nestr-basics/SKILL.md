@@ -228,6 +228,8 @@ nestr nests activity <id> --follow --interval 60   # poll; one JSON line per new
   one JSON line, oldest first, whatever `-o` says. It starts after `--since` when given,
   otherwise after the newest entry at start, which is not printed. A failed poll is reported
   on stderr and the next poll covers the same span, so nothing is lost or printed twice.
+  A rejected login, a refused right or a missing nest is not retried: it exits non-zero
+  with the error.
   `--interval` defaults to 120 seconds.
 - With `--since` or `--follow`, `--limit` is the page size used while paging back
   (default 200, the API maximum). Filter by user or type with `jq`.

@@ -365,3 +365,74 @@ fn the_cursor_is_read_from_the_next_link() {
     );
     assert_eq!(activity::cursor_from_next("not a url"), None);
 }
+
+#[test]
+fn follow_retries_only_what_a_retry_can_fix() {
+    use nestr_cli::error::NestrError;
+    let api = |status| NestrError::Api {
+        status,
+        message: "x".into(),
+    };
+    assert!(activity::is_transient(&api(500)));
+    assert!(activity::is_transient(&api(503)));
+    assert!(activity::is_transient(&api(429)));
+    assert!(!activity::is_transient(&NestrError::Auth("revoked".into())));
+    assert!(!activity::is_transient(&NestrError::Permission(
+        "no".into()
+    )));
+    assert!(!activity::is_transient(&NestrError::NotFound(
+        "gone".into()
+    )));
+    assert!(!activity::is_transient(&NestrError::Validation(
+        "bad".into()
+    )));
+}
+
+/// The binary, `--follow`, against a server that rejects the key: it must exit
+/// with the error instead of retrying forever.
+#[tokio::test]
+async fn follow_exits_when_the_credential_is_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/nests/n1/activity"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({"message": "revoked"})))
+        .mount(&server)
+        .await;
+    let home = tempfile::tempdir().unwrap();
+    let profiles = home.path().join(".nestr").join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("default.toml"),
+        format!(
+            "auth = \"api_key\"\ncredential_storage = \"file\"\nhost = \"{}\"\n\
+             workspace_id = \"ws1\"\napi_key = \"test-key\"\n",
+            server.uri()
+        ),
+    )
+    .unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
+        .args([
+            "nests",
+            "activity",
+            "n1",
+            "--follow",
+            "--since",
+            "e1",
+            "--interval",
+            "1",
+        ])
+        .env("NESTR_HOME", home.path())
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_PROFILE")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let status = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait())
+        .await
+        .expect("--follow kept retrying a rejected credential")
+        .unwrap();
+    assert!(!status.success());
+}
