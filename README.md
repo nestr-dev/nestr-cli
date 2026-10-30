@@ -86,7 +86,7 @@ nestr work                    # open projects + todos
 | Flag | Purpose |
 |---|---|
 | `-p, --profile <name>` | pick a profile for this invocation |
-| `--api-key <key>` / `--host <url>` | override the profile's credential / host. Prefer `NESTR_API_KEY` — `--api-key` is visible in shell history and `ps`. |
+| `--api-key <key>` / `--host <url>` | override the profile's credential / host. Never pass `--api-key` on a command line: it is visible in shell history and `ps`. Use a profile, or `NESTR_API_KEY`. |
 | `-o, --output text\|json` | `text` tables (default) or raw `json` for `jq` |
 | `--yes` | skip destructive-action confirmations (required for agents/scripts) |
 | `--read-only` | hard-block every write (also `NESTR_READ_ONLY=1`) |

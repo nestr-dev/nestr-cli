@@ -205,6 +205,44 @@ nestr activity --user <userId>           # a colleague's (or an agent's) activit
 report on. An OAuth login granted for a workspace only gets a "single user scoped
 access" error: run `nestr auth login` again and grant access to your own user account.
 
+### A nest's activity
+
+`nests activity` reads what happened on a nest and everything beneath it, newest first:
+the same entries as the Activity tab, with `id`, `date`, `type`, `userId`, `nestId`,
+`nestTitle`, `description` and `changes` (each changed field before and after). It signs
+in with the active profile like every other command; never pass `--api-key` on a command
+line for it (a script that watches a nest runs as long as the watch, and its arguments are
+visible in `ps`).
+
+```bash
+nestr nests activity <id>                          # table, newest first
+nestr nests activity <id> --limit 1 -o json        # the newest entry, as a one-element JSON array
+nestr nests activity <id> --depth 0                # the nest itself only (N levels, or all)
+nestr nests activity <id> --since <entryId> -o json   # only what is newer than that entry
+nestr nests activity <id> --follow --interval 60   # poll; one JSON line per new entry
+```
+
+- `--since <entryId>` pages back through the API's cursor (`links.next`) until it reaches
+  that entry, at most 20 pages, so a burst bigger than one page is not cut off. If the entry
+  is not found (deleted, outside `--depth`, or more than 20 pages back), nothing is printed,
+  stderr says which of those it was, and the exit code is **4**. Every other error exits 1.
+  On 4, start again without `--since` (for example `--limit 1`) to get a new baseline.
+- `--follow` never ends on its own (Ctrl-C to stop). It prints each new entry to stdout as
+  one JSON line, oldest first, whatever `-o` says. It starts after `--since` when given,
+  otherwise after the newest entry at start, which is not printed.
+  - A failed read (server error, rate limit, network), including the first one, is reported
+    on stderr and retried. The wait doubles after each failure in a row, up to 10 minutes
+    (or `--interval`, if longer), and drops back to `--interval` after a good poll. The next
+    poll covers the same span, so nothing is lost or printed twice.
+  - A rejected login, a refused right or a missing nest is not retried: it exits 1 with the
+    error. A `--since` entry that is not found exits 4, as above.
+  - If the entry it is waiting after is deleted later, it says so on stderr, prints only
+    entries newer than it, and carries on.
+  - When stdout is closed (`| head`, a stopped monitor), it exits quietly with 0.
+  - `--interval` defaults to 120 seconds.
+- With `--since` or `--follow`, `--limit` is the page size used while paging back
+  (default 200, the API maximum). Filter by user or type with `jq`.
+
 ## Safety
 
 Destructive commands (`nests delete`, `nests recurrence skip`/`delete-series`, `comments delete`, `nests files delete`) ask for confirmation;
