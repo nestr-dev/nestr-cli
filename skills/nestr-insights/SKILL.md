@@ -40,6 +40,9 @@ nestr nests update <storyId> --field userstory.sprint=<sprintId>
 nestr nests update <taskId> --proxy-assign <roleId>
 ```
 
+`recurrence` links follow a series, so change the series with `nests recurrence`;
+`templateCopy` links follow a copy's `data.copiedFrom`.
+
 A `depends_on` link that would create a cycle is refused. For other relations, a link
 that already runs the other way is refused rather than doubled: remove it first. If
 `links remove` finds the link only in the other direction, the error prints the
