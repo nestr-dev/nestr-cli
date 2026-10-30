@@ -35,6 +35,12 @@ pub enum LinksCmd {
     /// `nestr links add <dependent> depends_on <predecessor>`. A dependency that would
     /// create a cycle is refused. For other relations, a link that already runs the
     /// other way is refused rather than doubled; remove it first to reverse it.
+    ///
+    /// Links the server writes itself are refused, and the error names what to set
+    /// instead: a link field on the source (a tension's meeting, a story's sprint, epic
+    /// or milestone: `nests update <id> --field tension.meeting=<meetingId>`),
+    /// `proxyAssign` (`nests update <id> --proxy-assign <roleId>`), `recurrence` and
+    /// `templateCopy`. `links list` still reads them.
     Add {
         source_id: String,
         relation: String,
@@ -43,7 +49,8 @@ pub enum LinksCmd {
     /// Remove the link from SOURCE_ID to TARGET_ID.
     ///
     /// Only the link in that direction is removed. If the link runs the other way,
-    /// the error names the command that removes it.
+    /// the error names the command that removes it. The links `links add` refuses are
+    /// refused here too: clear the field or property that made them instead.
     Remove {
         source_id: String,
         relation: String,

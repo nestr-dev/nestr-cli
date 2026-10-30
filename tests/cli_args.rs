@@ -184,6 +184,24 @@ fn nests_update_clear_due_conflicts_with_due() {
 }
 
 #[test]
+fn nests_update_clear_proxy_assign_conflicts_with_proxy_assign() {
+    let out = run(&[
+        "nests",
+        "update",
+        "n1",
+        "--proxy-assign",
+        "role-1",
+        "--clear-proxy-assign",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("cannot be used with"),
+        "expected a clap conflict error, got: {stderr}"
+    );
+}
+
+#[test]
 fn nests_activity_depth_is_a_number_or_all() {
     let out = run(&["nests", "activity", "n1", "--depth", "deep"]);
     let stderr = String::from_utf8_lossy(&out.stderr);

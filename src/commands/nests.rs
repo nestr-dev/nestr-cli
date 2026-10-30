@@ -120,6 +120,13 @@ pub enum NestsCmd {
         /// Keys are passed through and validated by the server.
         #[arg(long = "field")]
         fields: Vec<String>,
+        /// Proxy-assign the new nest to a role or circle by id, as the assign dialog in
+        /// the app does: it keeps its parent, shows under the role as a mirror, and its
+        /// assignee becomes the role's first filler (--assignee wins). Only a nest inside
+        /// a role or circle can be proxy-assigned; one directly under a role or circle is
+        /// moved there instead, with a warning.
+        #[arg(long, value_name = "ROLE_OR_CIRCLE_ID")]
+        proxy_assign: Option<String>,
     },
     /// Update fields on a nest.
     Update {
@@ -178,6 +185,17 @@ pub enum NestsCmd {
         /// fields named are touched.
         #[arg(long = "field")]
         fields: Vec<String>,
+        /// Proxy-assign the nest to a role or circle by id, as the assign dialog in the
+        /// app does: it keeps its parent, shows under the role as a mirror, and its
+        /// assignee becomes the role's first filler (--assignee wins). Naming the role or
+        /// circle it already sits in clears it. Only a nest inside a role or circle can be
+        /// proxy-assigned; one directly under a role or circle is moved there instead,
+        /// with a warning.
+        #[arg(long, value_name = "ROLE_OR_CIRCLE_ID")]
+        proxy_assign: Option<String>,
+        /// Remove the proxy-assignment (sends `proxyAssign: null`).
+        #[arg(long, conflicts_with = "proxy_assign")]
+        clear_proxy_assign: bool,
     },
     /// Delete a nest (soft delete).
     Delete { id: String },
@@ -493,6 +511,19 @@ pub fn apply_schedule(
     }
 }
 
+/// Add `proxyAssign` to a create/update body: the role or circle id, or `null` for
+/// `--clear-proxy-assign`. The server applies it the way the app's assign dialog does.
+pub fn apply_proxy_assign(body: &mut Value, proxy_assign: Option<String>, clear: bool) {
+    let Some(map) = body.as_object_mut() else {
+        return;
+    };
+    if let Some(id) = proxy_assign {
+        map.insert("proxyAssign".into(), id.into());
+    } else if clear {
+        map.insert("proxyAssign".into(), Value::Null);
+    }
+}
+
 pub async fn create_nest(client: &NestrClient, body: &Value) -> crate::error::Result<Value> {
     let raw: Value = client.post("/nests", body).await?;
     let (data, _, _) = unwrap_data(raw);
@@ -679,6 +710,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             all_day,
             assignees,
             fields,
+            proxy_assign,
         } => {
             safety::enforce_read_only(g.read_only, "nests create")?;
             validation::validate_prime_labels(&labels)?;
@@ -695,6 +727,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &field_values,
             );
             apply_schedule(&mut body, start, all_day, false, false);
+            apply_proxy_assign(&mut body, proxy_assign, false);
             let data = create_nest(&client, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
@@ -713,6 +746,8 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             labels,
             assignees,
             fields,
+            proxy_assign,
+            clear_proxy_assign,
         } => {
             safety::enforce_read_only(g.read_only, "nests update")?;
             if !labels.is_empty() {
@@ -732,6 +767,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 &field_values,
             );
             apply_schedule(&mut body, start, all_day, clear_start, clear_due);
+            apply_proxy_assign(&mut body, proxy_assign, clear_proxy_assign);
             let data = update_nest(&client, &id, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }

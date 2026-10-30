@@ -25,10 +25,23 @@ links, and `links remove` only removes the one in the order you give.
 nestr links list <nestId>                       # all links of a nest, with direction
 nestr links list <nestId> --relation meeting    # filter by relation
 nestr links list <nestId> --direction in        # incoming only (in | out)
-nestr links add <sourceId> meeting <targetId>   # link source -> target via "meeting"
-nestr links remove <sourceId> meeting <targetId> # remove that source -> target link
 nestr links add <dependentId> depends_on <predecessorId>  # dependent waits for predecessor
+nestr links remove <dependentId> depends_on <predecessorId> # remove that link
 ```
+
+Some links are written by the server as the result of another change, and `links add`
+/ `links remove` refuse them with the setting to change instead. A link field on the
+source nest (a tension's `meeting`, a story's sprint, epic or milestone) is set with
+`--field`, and a proxy-assignment with `--proxy-assign`:
+
+```bash
+nestr nests update <tensionId> --field tension.meeting=<meetingId>  # put it on the agenda
+nestr nests update <storyId> --field userstory.sprint=<sprintId>
+nestr nests update <taskId> --proxy-assign <roleId>
+```
+
+`recurrence` links follow a series, so change the series with `nests recurrence`;
+`templateCopy` links follow a copy's `data.copiedFrom`.
 
 A `depends_on` link that would create a cycle is refused. For other relations, a link
 that already runs the other way is refused rather than doubled: remove it first. If

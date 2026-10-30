@@ -76,7 +76,8 @@ nestr nests create --title "Pre-launch checklist" --parent <projectId> --label c
   plain `task`-labelled todo, not a project.** A nest can carry only one prime label,
   with one exception: `userstory` implies `project`, so a story legitimately carries
   both (the server adds `project` for you). `sprint`/`epic`/`milestone` never pair with
-  `project` — link stories to them with `nestr links add` instead.
+  `project` — point a story at one with `--field userstory.sprint=<id>` (or
+  `userstory.epic` / `userstory.milestone`) instead.
 - `--assignee` sets who does the work (the nest's `users`). **A project or task created
   with no `--assignee` is unassigned — it shows under nobody's work.** Pass `me` for
   yourself, or a user id from `nestr users list` (repeatable for several people).
