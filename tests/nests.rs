@@ -614,3 +614,78 @@ async fn update_clear_due_combines_with_start_and_all_day() {
     )
     .await;
 }
+
+#[test]
+fn apply_proxy_assign_sends_the_role_id() {
+    let mut body = serde_json::json!({"title": "Draft"});
+    nests::apply_proxy_assign(&mut body, Some("role-1".into()), false);
+    assert_eq!(
+        body,
+        serde_json::json!({"title": "Draft", "proxyAssign": "role-1"})
+    );
+}
+
+#[test]
+fn apply_proxy_assign_clear_sends_null() {
+    let mut body = serde_json::json!({});
+    nests::apply_proxy_assign(&mut body, None, true);
+    assert_eq!(body, serde_json::json!({"proxyAssign": null}));
+}
+
+#[test]
+fn apply_proxy_assign_leaves_it_out_when_not_passed() {
+    let mut body = serde_json::json!({"title": "Draft"});
+    nests::apply_proxy_assign(&mut body, None, false);
+    assert_eq!(body, serde_json::json!({"title": "Draft"}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_proxy_assign_sends_the_role_id() {
+    assert_update_sends(
+        &["--proxy-assign", "role-1"],
+        serde_json::json!({"proxyAssign": "role-1"}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_clear_proxy_assign_sends_null() {
+    assert_update_sends(
+        &["--clear-proxy-assign"],
+        serde_json::json!({"proxyAssign": null}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_proxy_assign_sends_the_role_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/nests"))
+        .and(wiremock::matchers::body_partial_json(
+            serde_json::json!({"title": "Draft", "proxyAssign": "role-1"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n2","title":"Draft","proxyAssign":"role-1"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = run_cli(
+        &server.uri(),
+        &[
+            "-o",
+            "json",
+            "nests",
+            "create",
+            "--title",
+            "Draft",
+            "--parent",
+            "p1",
+            "--proxy-assign",
+            "role-1",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+}

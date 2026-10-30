@@ -120,8 +120,9 @@ reporting. The server adds `project` itself whenever you apply `userstory`, so a
 story always carries both, and `--label userstory --label project` is accepted.
 `sprint`, `epic`, and `milestone` carry no such implication and must **not** be
 combined with `project` or with each other; stories relate to those containers
-through graph links (`userstory_sprint`, `userstory_epic`, `userstory_milestone`),
-never by sharing labels.
+through their `userstory.sprint`, `userstory.epic` and `userstory.milestone` fields
+(`--field userstory.sprint=<id>`), never by sharing labels. The server keeps the
+matching graph links in step; `links add` refuses to write them directly.
 
 Other labels (e.g. `urgent`, `now`) are free-form, not prime — discover them with
 `nestr labels list`. `now` is the label `plan add`/`plan remove` toggle.
@@ -218,6 +219,22 @@ nestr nests recurrence delete-series <id>                # delete the series and
   written.
 - To leave dates out, `skip` them. Don't bound the rule with COUNT and start a second
   series, because that leaves two nests with the same title.
+
+## Proxy-assign
+
+`--proxy-assign <roleOrCircleId>` on `nests create` and `nests update` does what the
+assign dialog in the app does for work that sits inside a role or circle: the nest keeps
+its parent, shows under the role as a mirror, and its assignee becomes the role's first
+filler (nobody for a circle; an `--assignee` in the same call wins). `--clear-proxy-assign`
+(update only), or naming the role or circle the nest already sits in, removes it. A nest
+directly under a role or circle is moved there instead, and the server warns. Read it
+back as `proxyAssign` with `nests get <id> -o json`.
+
+```bash
+nestr nests update <taskId> --proxy-assign <roleId>
+nestr nests update <taskId> --clear-proxy-assign
+nestr nests create --title "Draft the brief" --parent <projectId> --proxy-assign <roleId>
+```
 
 ## Formatting
 
