@@ -69,6 +69,11 @@ pub enum TensionsCmd {
     /// Retract a proposed tension (proposed → draft).
     Retract { nest_id: String, tension_id: String },
     /// Record your consent vote.
+    ///
+    /// A consent decision belongs to a person, so it is taken from the token and cannot be
+    /// cast for somebody else. A token naming no user, which is what a workspace API key is,
+    /// is refused with a 403, as is one naming several; vote from a user-scoped key or after
+    /// `nestr auth login`. Submitting and retracting still work from a workspace key.
     Vote {
         nest_id: String,
         tension_id: String,

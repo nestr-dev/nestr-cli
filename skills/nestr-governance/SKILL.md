@@ -83,6 +83,12 @@ nestr tensions vote <circleId> <tensionId> accept    # consent
 nestr tensions vote <circleId> <tensionId> escalate  # object — one objection blocks consensus
 ```
 
+A consent decision belongs to a person, so the voter is taken from the token and cannot
+be cast for somebody else. Voting needs a token that names exactly one user: an OAuth
+login, or a user-scoped API key. A **workspace API key names none and is refused with a
+403**, as is a key naming several users. `submit` and `retract` are unaffected and still
+work from a workspace key.
+
 `nestr tensions mine` lists tensions you created or are assigned to — check it at the
 start of a session and after finishing work.
 
