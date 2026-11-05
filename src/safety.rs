@@ -31,16 +31,33 @@ pub fn enforce_read_only(read_only: bool, action: &str) -> Result<()> {
     Ok(())
 }
 
-const AGENT_ENV_VARS: &[&str] = &[
-    "CLAUDECODE",
-    "CLAUDE_CODE",
-    "CODEX",
-    "CURSOR_AGENT",
-    "NESTR_AGENT_MODE",
+/// The environment variables a coding agent sets, each with the fixed name the
+/// API is told when it is the one driving the CLI. Only these names ever leave
+/// the machine: never the variable's value, a path, or anything about the user.
+const AGENT_ENV_VARS: &[(&str, &str)] = &[
+    ("CLAUDECODE", "claude-code"),
+    ("CLAUDE_CODE", "claude-code"),
+    ("CODEX", "codex"),
+    ("CURSOR_AGENT", "cursor"),
+    ("NESTR_AGENT_MODE", "agent"),
 ];
 
+/// Which agent is driving the CLI, given a way to look a variable up. Pure, so
+/// it is tested without touching the process environment.
+pub fn agent_name_from(is_set: impl Fn(&str) -> bool) -> Option<&'static str> {
+    AGENT_ENV_VARS
+        .iter()
+        .find(|(var, _)| is_set(var))
+        .map(|(_, name)| *name)
+}
+
+/// Which agent is driving the CLI, if any.
+pub fn agent_name() -> Option<&'static str> {
+    agent_name_from(|v| std::env::var_os(v).is_some())
+}
+
 pub fn is_agent_mode() -> bool {
-    AGENT_ENV_VARS.iter().any(|v| std::env::var(v).is_ok())
+    agent_name().is_some()
 }
 
 /// Confirm a destructive action. `--yes` auto-approves; agent/non-tty error out.
@@ -79,6 +96,26 @@ mod tests {
         assert!(is_write_verb("update"));
         assert!(!is_write_verb("list"));
         assert!(!is_write_verb("get"));
+    }
+
+    #[test]
+    fn names_the_agent_from_its_variable() {
+        assert_eq!(agent_name_from(|v| v == "CLAUDECODE"), Some("claude-code"));
+        assert_eq!(agent_name_from(|v| v == "CODEX"), Some("codex"));
+        assert_eq!(agent_name_from(|v| v == "CURSOR_AGENT"), Some("cursor"));
+        assert_eq!(agent_name_from(|v| v == "NESTR_AGENT_MODE"), Some("agent"));
+        assert_eq!(agent_name_from(|_| false), None);
+    }
+
+    #[test]
+    fn agent_names_are_fixed_header_safe_labels() {
+        for (_, name) in AGENT_ENV_VARS {
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{name} must stay a fixed lowercase label"
+            );
+        }
     }
 
     #[test]
