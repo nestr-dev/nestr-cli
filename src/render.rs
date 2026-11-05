@@ -435,8 +435,9 @@ pub fn sanitize(s: &str) -> String {
 /// Remove whole terminal escape sequences, not only their control bytes: dropping
 /// just the ESC left `[31m` behind in every table. Covers CSI (`ESC [` or the C1
 /// byte, parameters, then a final byte), OSC/DCS/SOS/PM/APC strings up to BEL or
-/// ST, and two-byte escapes. A lone ESC before `<` is kept, so a sequence split by
-/// an HTML tag still joins up once the tag is stripped and is removed then.
+/// ST (their one-byte C1 forms too), and two-byte escapes. A lone ESC before `<` or
+/// `&` is kept, so a sequence split by an HTML tag or entity still joins up once the
+/// tag is stripped or the entity decoded, and is removed then.
 fn remove_escape_sequences(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -459,26 +460,32 @@ fn remove_escape_sequences(s: &str) -> String {
             i = j;
             continue;
         }
+        let string_body = match (c, next) {
+            ('\u{1b}', Some(']' | 'P' | 'X' | '^' | '_')) => Some(i + 2),
+            ('\u{90}' | '\u{98}' | '\u{9d}' | '\u{9e}' | '\u{9f}', _) => Some(i + 1),
+            _ => None,
+        };
+        if let Some(mut j) = string_body {
+            // Up to BEL, ST (`ESC \`) or the one-byte ST.
+            while j < chars.len() {
+                if chars[j] == '\u{07}' || chars[j] == '\u{9c}' {
+                    j += 1;
+                    break;
+                }
+                if chars[j] == '\u{1b}' && chars.get(j + 1) == Some(&'\\') {
+                    j += 2;
+                    break;
+                }
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
         if c == '\u{1b}' {
             match next {
-                Some(']' | 'P' | 'X' | '^' | '_') => {
-                    let mut j = i + 2;
-                    while j < chars.len() {
-                        if chars[j] == '\u{07}' {
-                            j += 1;
-                            break;
-                        }
-                        if chars[j] == '\u{1b}' && chars.get(j + 1) == Some(&'\\') {
-                            j += 2;
-                            break;
-                        }
-                        j += 1;
-                    }
-                    i = j;
-                    continue;
-                }
-                // Intermediate bytes, then the final one (e.g. `ESC ( B`).
-                Some(n) if ('\u{20}'..='\u{2f}').contains(&n) => {
+                // Intermediate bytes, then the final one (e.g. `ESC ( B`). Not `&`:
+                // that starts an entity, which may encode the rest of the sequence.
+                Some(n) if n != '&' && ('\u{20}'..='\u{2f}').contains(&n) => {
                     let mut j = i + 1;
                     while j < chars.len() && ('\u{20}'..='\u{2f}').contains(&chars[j]) {
                         j += 1;
@@ -1688,6 +1695,9 @@ mod tests {
         assert_eq!(sanitize("\u{9b}31mz"), "z");
         // An unterminated sequence at the end leaves nothing either.
         assert_eq!(sanitize("tail\u{1b}[31"), "tail");
+        // One-byte C1 strings: OSC ended by the C1 ST, DCS ended by BEL.
+        assert_eq!(sanitize("a\u{9d}0;title\u{9c}b"), "ab");
+        assert_eq!(sanitize("a\u{90}q\u{07}b"), "ab");
     }
 
     #[test]
@@ -1698,6 +1708,7 @@ mod tests {
     #[test]
     fn clean_text_removes_a_sequence_split_by_an_entity_or_a_tag() {
         assert_eq!(clean_text("&#27;[31mWon"), "Won");
+        assert_eq!(clean_text("\u{1b}&#91;31mWon"), "Won");
         assert_eq!(clean_text("\u{1b}<b>[31m</b>Won"), "Won");
     }
 
