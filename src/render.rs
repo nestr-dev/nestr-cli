@@ -426,9 +426,77 @@ pub fn output_roles(
 /// bare CR, etc. Guards against OSC-52 clipboard writes, title spoofing, and
 /// cursor/erase tricks authored by other workspace members (SEC-1).
 pub fn sanitize(s: &str) -> String {
-    s.chars()
+    remove_escape_sequences(s)
+        .chars()
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
         .collect()
+}
+
+/// Remove whole terminal escape sequences, not only their control bytes: dropping
+/// just the ESC left `[31m` behind in every table. Covers CSI (`ESC [` or the C1
+/// byte, parameters, then a final byte), OSC/DCS/SOS/PM/APC strings up to BEL or
+/// ST, and two-byte escapes. A lone ESC before `<` is kept, so a sequence split by
+/// an HTML tag still joins up once the tag is stripped and is removed then.
+fn remove_escape_sequences(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        let csi_body = match (c, next) {
+            ('\u{1b}', Some('[')) => Some(i + 2),
+            ('\u{9b}', _) => Some(i + 1),
+            _ => None,
+        };
+        if let Some(mut j) = csi_body {
+            while j < chars.len() && ('\u{20}'..='\u{3f}').contains(&chars[j]) {
+                j += 1;
+            }
+            if j < chars.len() && ('\u{40}'..='\u{7e}').contains(&chars[j]) {
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        if c == '\u{1b}' {
+            match next {
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    let mut j = i + 2;
+                    while j < chars.len() {
+                        if chars[j] == '\u{07}' {
+                            j += 1;
+                            break;
+                        }
+                        if chars[j] == '\u{1b}' && chars.get(j + 1) == Some(&'\\') {
+                            j += 2;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    i = j;
+                    continue;
+                }
+                // Intermediate bytes, then the final one (e.g. `ESC ( B`).
+                Some(n) if ('\u{20}'..='\u{2f}').contains(&n) => {
+                    let mut j = i + 1;
+                    while j < chars.len() && ('\u{20}'..='\u{2f}').contains(&chars[j]) {
+                        j += 1;
+                    }
+                    i = (j + 1).min(chars.len());
+                    continue;
+                }
+                Some(n) if n != '<' && ('\u{30}'..='\u{7e}').contains(&n) => {
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 /// The uniform cleaner for every API string shown in text mode. Mirrors the web
@@ -438,7 +506,9 @@ pub fn sanitize(s: &str) -> String {
 /// to spaces — and re-sanitized *after* decoding so an entity-encoded control char
 /// (e.g. `&#27;`) can't smuggle a terminal escape back in.
 pub fn clean_text(s: &str) -> String {
-    let stripped = strip_html(&sanitize(s));
+    // Whole sequences only before the tags go: a lone ESC must survive to meet the
+    // rest of a sequence an HTML tag split off, for the final sanitize to remove.
+    let stripped = strip_html(&remove_escape_sequences(s));
     let decoded = htmlize::unescape(stripped.as_str());
     sanitize(&decoded)
         .split_whitespace()
@@ -1603,6 +1673,32 @@ mod tests {
             clean.contains('\t') && clean.contains('\n'),
             "tab/newline kept"
         );
+    }
+
+    #[test]
+    fn sanitize_removes_whole_escape_sequences() {
+        assert_eq!(sanitize("Review pack\u{1b}[31m"), "Review pack");
+        assert_eq!(sanitize("\u{1b}[1;31mred\u{1b}[0m done"), "red done");
+        // Cursor movement and screen clears.
+        assert_eq!(sanitize("x\u{1b}[2Ay\u{1b}[2J"), "xy");
+        // OSC titles, ended by BEL or by ST (ESC \).
+        assert_eq!(sanitize("a\u{1b}]0;title\u{07}b"), "ab");
+        assert_eq!(sanitize("a\u{1b}]0;title\u{1b}\\b"), "ab");
+        // The one-byte C1 form of CSI.
+        assert_eq!(sanitize("\u{9b}31mz"), "z");
+        // An unterminated sequence at the end leaves nothing either.
+        assert_eq!(sanitize("tail\u{1b}[31"), "tail");
+    }
+
+    #[test]
+    fn sanitize_leaves_ordinary_brackets_alone() {
+        assert_eq!(sanitize("[draft] Plan [31m]"), "[draft] Plan [31m]");
+    }
+
+    #[test]
+    fn clean_text_removes_a_sequence_split_by_an_entity_or_a_tag() {
+        assert_eq!(clean_text("&#27;[31mWon"), "Won");
+        assert_eq!(clean_text("\u{1b}<b>[31m</b>Won"), "Won");
     }
 
     #[test]
