@@ -230,6 +230,21 @@ pub fn format_bytes(n: u64) -> String {
     }
 }
 
+/// The text-mode line for an inline upload: the reference to put in the description.
+/// None for a plain attachment. The reference is meant to be copied verbatim, so it
+/// goes through `sanitize` (control bytes out) and not `clean_text`, which decodes
+/// entities and strips `<…>` for display, as URLs do.
+pub fn inline_reference_hint(data: &Value) -> Option<String> {
+    let markdown = str_of(data, "markdown");
+    if markdown.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Put this in the description where it should show:\n{}",
+        render::sanitize(markdown)
+    ))
+}
+
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
@@ -445,13 +460,8 @@ pub async fn run(
                         format_bytes(data.get("size").and_then(Value::as_u64).unwrap_or(0)),
                         render::clean_text(str_of(&data, "id"))
                     );
-                    // An inline image only shows once its reference is in the text.
-                    let markdown = str_of(&data, "markdown");
-                    if !markdown.is_empty() {
-                        println!(
-                            "Put this in the description where it should show:\n{}",
-                            render::clean_text(markdown)
-                        );
+                    if let Some(hint) = inline_reference_hint(&data) {
+                        println!("{hint}");
                     }
                 }
             }

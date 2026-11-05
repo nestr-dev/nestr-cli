@@ -393,3 +393,20 @@ async fn delete_needs_yes_outside_a_terminal() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("--yes"));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[test]
+fn inline_reference_hint_prints_the_reference_verbatim() {
+    // An alt text with an entity-like `&` and angle brackets must come out exactly as
+    // the API returned it, or the copied reference differs from the stored one.
+    let markdown = "![R&amp;D <v2>.png](/file/download?id=f3&name=R%26D.png)";
+    let hint = files::inline_reference_hint(&json!({"id": "f3", "markdown": markdown})).unwrap();
+    assert!(hint.ends_with(markdown), "{hint}");
+    // Terminal control bytes are still kept out.
+    let hostile = files::inline_reference_hint(&json!({"markdown": "![a\u{1b}[31m](/x)"})).unwrap();
+    assert!(!hostile.contains('\u{1b}'), "{hostile}");
+}
+
+#[test]
+fn inline_reference_hint_is_absent_for_a_plain_attachment() {
+    assert!(files::inline_reference_hint(&json!({"id": "f1", "name": "a.txt"})).is_none());
+}
