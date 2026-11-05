@@ -41,6 +41,12 @@ pub enum FilesCmd {
         offset: Option<u64>,
     },
     /// Upload a local file and attach it to a nest (a comment id works too).
+    ///
+    /// With --inline, an image is uploaded as part of the nest's text instead: it stays
+    /// off the attachment list, like an image pasted in Nestr, and the command prints
+    /// the markdown reference to put in the description where it should show, e.g.
+    /// ![shot.png](/file/download?id=FILE_ID&name=shot.png). In HTML that is
+    /// <img src="/file/download?id=FILE_ID&name=shot.png" alt="shot.png">.
     Upload {
         nest_id: String,
         /// The local file to upload.
@@ -51,6 +57,9 @@ pub enum FilesCmd {
         /// MIME type (guessed from the extension when omitted).
         #[arg(long)]
         content_type: Option<String>,
+        /// Upload an image (PNG, JPEG, GIF or WebP) for the nest's text, not as an attachment.
+        #[arg(long)]
+        inline: bool,
     },
     /// Delete a file from a nest (permanent).
     Delete { nest_id: String, file_id: String },
@@ -114,12 +123,17 @@ pub async fn upload_file(
     name: &str,
     content_type: &str,
     bytes: &[u8],
+    inline: bool,
 ) -> crate::error::Result<Value> {
-    let body = json!({
+    let mut body = json!({
         "name": name,
         "contentType": content_type,
         "dataBase64": STANDARD.encode(bytes),
     });
+    // Only sent when asked, so a plain upload's body is exactly what it was.
+    if inline {
+        body["inline"] = json!(true);
+    }
     let raw: Value = client
         .post(&format!("/nests/{nest_id}/files"), &body)
         .await?;
@@ -406,6 +420,7 @@ pub async fn run(
             path,
             name,
             content_type,
+            inline,
         } => {
             safety::enforce_read_only(g.read_only, "nests files upload")?;
             let name = match name {
@@ -420,15 +435,25 @@ pub async fn run(
                 content_type.unwrap_or_else(|| guess_content_type(&name).to_string());
             let bytes =
                 std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-            let data = upload_file(client, &nest_id, &name, &content_type, &bytes).await?;
+            let data = upload_file(client, &nest_id, &name, &content_type, &bytes, inline).await?;
             match cfg.output {
                 OutputFormat::Json => print_json(&data)?,
-                OutputFormat::Text => println!(
-                    "Uploaded {} ({}) to {nest_id}  [{}]",
-                    render::clean_text(str_of(&data, "name")),
-                    format_bytes(data.get("size").and_then(Value::as_u64).unwrap_or(0)),
-                    render::clean_text(str_of(&data, "id"))
-                ),
+                OutputFormat::Text => {
+                    println!(
+                        "Uploaded {} ({}) to {nest_id}  [{}]",
+                        render::clean_text(str_of(&data, "name")),
+                        format_bytes(data.get("size").and_then(Value::as_u64).unwrap_or(0)),
+                        render::clean_text(str_of(&data, "id"))
+                    );
+                    // An inline image only shows once its reference is in the text.
+                    let markdown = str_of(&data, "markdown");
+                    if !markdown.is_empty() {
+                        println!(
+                            "Put this in the description where it should show:\n{}",
+                            render::clean_text(markdown)
+                        );
+                    }
+                }
             }
         }
         FilesCmd::Delete { nest_id, file_id } => {

@@ -122,8 +122,13 @@ nestr nests files read <nestId> <fileId>              # prints a text/JSON file
 nestr nests files read <nestId> <fileId> --save ./spec.pdf   # any file, to disk
 nestr nests files upload <nestId> ./notes.md          # type guessed from the extension
 nestr nests files upload <nestId> ./export --name data.csv --content-type text/csv
+nestr nests files upload <nestId> ./shot.png --inline # for the nest's text: prints the reference to embed
 nestr nests files delete <nestId> <fileId> --yes      # permanent
 ```
+
+`--inline` uploads an image (PNG, JPEG, GIF or WebP) as part of the nest's text rather than as an
+attachment: it stays off the attachment list, like an image pasted in Nestr. Put the printed
+markdown reference (`markdown` in `-o json`) in the description where the image should show.
 
 `read` only prints text types; anything else needs `--save` (it won't overwrite an
 existing file without `--force`). `-o json` returns the file with its bytes in

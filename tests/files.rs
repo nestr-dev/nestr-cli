@@ -108,10 +108,60 @@ async fn upload_posts_name_type_and_base64_bytes() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let data = files::upload_file(&client, "n1", "data.csv", "text/csv", b"a,b\n1,2\n")
+    let data = files::upload_file(&client, "n1", "data.csv", "text/csv", b"a,b\n1,2\n", false)
         .await
         .unwrap();
     assert_eq!(data["id"], "f9");
+}
+
+#[tokio::test]
+async fn upload_inline_asks_for_an_inline_image_and_returns_its_reference() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/n1/files"))
+        .and(body_json(json!({
+            "name": "shot.png",
+            "contentType": "image/png",
+            "dataBase64": b64(b"png"),
+            "inline": true,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {
+                "id": "f3", "name": "shot.png", "contentType": "image/png", "size": 3,
+                "context": "inline_image",
+                "markdown": "![shot.png](/file/download?id=f3&name=shot.png)"
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = files::upload_file(&client, "n1", "shot.png", "image/png", b"png", true)
+        .await
+        .unwrap();
+    assert_eq!(
+        data["markdown"],
+        "![shot.png](/file/download?id=f3&name=shot.png)"
+    );
+}
+
+#[tokio::test]
+async fn upload_inline_refusal_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/n1/files"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
+            "status": "error",
+            "message": "An inline upload must be a PNG, JPEG, GIF or WebP image, not \"text/plain\""
+        })))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", b"a", true)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("PNG, JPEG, GIF or WebP"), "{err}");
 }
 
 #[tokio::test]
