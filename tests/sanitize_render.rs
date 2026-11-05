@@ -16,3 +16,19 @@ fn hostile_title_renders_without_control_bytes() {
     assert!(!out.contains('\u{07}'), "BEL leaked into table output");
     assert!(out.contains("title"), "legitimate text preserved");
 }
+
+#[test]
+fn colour_codes_in_a_title_leave_nothing_behind() {
+    let n: CompactNest = serde_json::from_value(serde_json::json!({
+        "_id": "abc",
+        "title": "Review \u{1b}[1;31mpack\u{1b}[0m\u{1b}[31m",
+        "labels": []
+    }))
+    .unwrap();
+    let out = nest_table(&[n]);
+    assert!(out.contains("Review pack"), "title text kept: {out}");
+    assert!(
+        !out.contains("[31m") && !out.contains("[0m"),
+        "colour code leaked: {out}"
+    );
+}
