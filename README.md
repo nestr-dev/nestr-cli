@@ -95,6 +95,8 @@ API warnings (an ignored write key, a dropped search operator, a default the ser
 
 Env overrides (precedence: flags > env > profile > defaults): `NESTR_PROFILE`, `NESTR_API_KEY`, `NESTR_HOST`. Credentials live in the OS keyring, or a `0600` file on platforms without one (e.g. Linux musl builds).
 
+Besides your request, every API call carries three identifying headers: `User-Agent: nestr-cli/<version>`, `X-Client-Consumer: nestr-cli`, and, when a coding agent runs the CLI, `X-Client-Agent` with a fixed name for it (`claude-code`, `codex`, `cursor`, or `agent` when `NESTR_AGENT_MODE` is set). None of them carries anything about you.
+
 ## Commands
 
 | Group | What it does |
