@@ -152,6 +152,11 @@ impl NestrClient {
             "X-Client-Consumer",
             header::HeaderValue::from_static(CLIENT_CONSUMER),
         );
+        // Tells the API an agent, not a person, is driving the CLI, so usage
+        // reports can tell the two apart. A fixed name from a short list.
+        if let Some(agent) = crate::safety::agent_name() {
+            headers.insert("X-Client-Agent", header::HeaderValue::from_static(agent));
+        }
         let _ = rustls::crypto::ring::default_provider().install_default();
         let inner = Client::builder()
             .default_headers(headers)
