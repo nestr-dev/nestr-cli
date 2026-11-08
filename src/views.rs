@@ -2,8 +2,17 @@
 //! Nestr's polymorphic payloads (unknown fields ignored, missing fields default).
 //! NEVER used for `-o json` output — that path prints the raw `Value`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+
+/// A null value reads as the default, as a missing key does, so one null row cannot empty a list.
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
 
 /// The compact field set the CLI renders for any Nest-shaped object
 /// (search hits, children, projects, inbox items, daily-plan items).
@@ -86,7 +95,7 @@ pub struct LabelView {
     pub color: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
-    #[serde(default, rename = "applicableTo")]
+    #[serde(default, rename = "applicableTo", deserialize_with = "null_as_default")]
     pub applicable_to: Vec<String>,
 }
 
@@ -165,9 +174,9 @@ pub struct UserView {
     pub profile: Option<UserProfile>,
     #[serde(default)]
     pub bot: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub labels: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub fields: serde_json::Map<String, serde_json::Value>,
 }
 

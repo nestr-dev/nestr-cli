@@ -119,3 +119,15 @@ async fn get_returns_applicable_to_and_user_fields() {
     assert_eq!(data["applicableTo"][0], "users");
     assert_eq!(data["userFields"][0]["code"], "url");
 }
+
+#[test]
+fn null_list_fields_read_as_empty_instead_of_failing_the_row() {
+    let label: nestr_cli::views::LabelView =
+        serde_json::from_value(serde_json::json!({"_id": "legal_rep", "applicableTo": null}))
+            .unwrap();
+    assert!(label.applicable_to.is_empty());
+    let user: nestr_cli::views::UserView =
+        serde_json::from_value(serde_json::json!({"_id": "u1", "labels": null, "fields": null}))
+            .unwrap();
+    assert!(user.labels.is_empty() && user.fields.is_empty());
+}
