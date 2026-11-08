@@ -583,10 +583,11 @@ pub fn user_table(users: &[UserView]) -> String {
                 u.username.clone().unwrap_or_default(),
                 u.full_name(),
                 if u.bot == Some(true) { "bot" } else { "" }.to_string(),
+                u.labels.join(", "),
             ]
         })
         .collect();
-    format_table(&["ID", "USERNAME", "NAME", "BOT"], rows)
+    format_table(&["ID", "USERNAME", "NAME", "BOT", "LABELS"], rows)
 }
 
 pub fn group_table(groups: &[GroupView]) -> String {

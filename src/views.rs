@@ -86,6 +86,8 @@ pub struct LabelView {
     pub color: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    #[serde(default, rename = "applicableTo")]
+    pub applicable_to: Vec<String>,
 }
 
 /// Extract display titles from an `accountabilities`/`domains` array, whose items
@@ -163,6 +165,10 @@ pub struct UserView {
     pub profile: Option<UserProfile>,
     #[serde(default)]
     pub bot: Option<bool>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 impl UserView {
