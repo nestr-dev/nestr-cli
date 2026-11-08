@@ -21,8 +21,6 @@ pub enum LabelsCmd {
     Create {
         title: String,
         #[arg(long)]
-        description: Option<String>,
-        #[arg(long)]
         color: Option<String>,
         #[arg(long)]
         icon: Option<String>,
@@ -34,8 +32,6 @@ pub enum LabelsCmd {
         label_id: String,
         #[arg(long)]
         title: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
         #[arg(long)]
         color: Option<String>,
         #[arg(long)]
@@ -160,7 +156,6 @@ pub fn parse_user_fields(arg: &str) -> crate::error::Result<Value> {
 #[allow(clippy::too_many_arguments)]
 pub fn label_body(
     title: Option<String>,
-    description: Option<String>,
     color: Option<String>,
     icon: Option<String>,
     opts: &UserLabelOpts,
@@ -168,12 +163,7 @@ pub fn label_body(
     clear_user_fields: bool,
 ) -> crate::error::Result<Value> {
     let mut map = serde_json::Map::new();
-    for (k, v) in [
-        ("title", title),
-        ("description", description),
-        ("color", color),
-        ("icon", icon),
-    ] {
+    for (k, v) in [("title", title), ("color", color), ("icon", icon)] {
         if let Some(v) = v {
             map.insert(k.into(), v.into());
         }
@@ -291,28 +281,18 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
         }
         LabelsCmd::Create {
             title,
-            description,
             color,
             icon,
             user_opts,
         } => {
             safety::enforce_read_only(g.read_only, "labels create")?;
-            let body = label_body(
-                Some(title),
-                description,
-                color,
-                icon,
-                &user_opts,
-                false,
-                false,
-            )?;
+            let body = label_body(Some(title), color, icon, &user_opts, false, false)?;
             let data = create_workspace(&client, cfg.require_workspace()?, &body).await?;
             output_label(&data, cfg.output)?;
         }
         LabelsCmd::Update {
             label_id,
             title,
-            description,
             color,
             icon,
             user_opts,
@@ -322,7 +302,6 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
             safety::enforce_read_only(g.read_only, "labels update")?;
             let body = label_body(
                 title,
-                description,
                 color,
                 icon,
                 &user_opts,

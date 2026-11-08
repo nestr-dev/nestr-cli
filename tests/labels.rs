@@ -65,8 +65,7 @@ async fn create_posts_applicable_to_and_user_fields() {
         &["nests", "users"],
         Some(r#"[{"id":"url","code":"url","title":"Register","type":"url"}]"#),
     );
-    let body =
-        labels::label_body(Some("Legal rep".into()), None, None, None, &o, false, false).unwrap();
+    let body = labels::label_body(Some("Legal rep".into()), None, None, &o, false, false).unwrap();
     assert_eq!(body, expected);
     let data = labels::create_workspace(&client, "ws1", &body)
         .await
@@ -88,7 +87,7 @@ async fn update_patches_and_null_resets() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let body = labels::label_body(None, None, None, None, &opts(&[], None), true, true).unwrap();
+    let body = labels::label_body(None, None, None, &opts(&[], None), true, true).unwrap();
     let data = labels::update_workspace(&client, "ws1", "legal_rep", &body)
         .await
         .unwrap();
