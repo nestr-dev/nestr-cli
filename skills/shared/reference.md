@@ -51,7 +51,7 @@ workspace-scoped command with no active workspace errors with guidance to run
 `nestr workspaces use <id>` or pass `-w`.
 
 - **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
-  `roles`, `users`, `groups`, `labels list`/`labels get`, `insights`, `export`,
+  `roles`, `users`, `groups`, `labels list`/`labels get`/`labels create`/`labels update`, `insights`, `export`,
   `webhooks`, `workspaces apps`, `workspaces docs`, `nests bulk-reorder`, `connectors`,
   `agents` (except `agents mode`), and `hints` with no nest id.
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,
@@ -285,7 +285,7 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 | `notifications`, `labels`, `projects` | stay current, labels, projects | nestr-basics |
 | `dm`, `queues` | direct messages, support queues | nestr-basics |
 | `tensions` | governance: propose → consent → enact | nestr-governance |
-| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members; `workspaces docs` reference documents | nestr-org |
+| `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members; `users labels` puts people labels and user fields on members; `workspaces docs` reference documents | nestr-org |
 | `links`, `insights`, `hints`, `export` | graph links, metrics, hint counts, JSON dumps | nestr-insights |
 | `webhooks` | workspace event subscriptions | nestr-webhooks |
 | `agents` | create and run agents; reactive or autonomous mode per nest | nestr-agents |

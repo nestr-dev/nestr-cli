@@ -17,11 +17,56 @@ pub enum LabelsCmd {
     },
     /// Get one workspace label by id.
     Get { label_id: String },
+    /// Create a workspace label (admin).
+    Create {
+        title: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+        #[arg(long)]
+        icon: Option<String>,
+        #[command(flatten)]
+        user_opts: UserLabelOpts,
+    },
+    /// Update a workspace label (admin).
+    Update {
+        label_id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+        #[arg(long)]
+        icon: Option<String>,
+        #[command(flatten)]
+        user_opts: UserLabelOpts,
+        /// Reset the label to apply to nests only.
+        #[arg(long, conflicts_with = "applies_to")]
+        reset_applies_to: bool,
+        /// Remove all user field definitions.
+        #[arg(long, conflicts_with = "user_fields")]
+        clear_user_fields: bool,
+    },
     /// Personal labels.
     Personal {
         #[command(subcommand)]
         cmd: PersonalCmd,
     },
+}
+
+/// Options that make a label apply to people.
+#[derive(clap::Args, Default)]
+pub struct UserLabelOpts {
+    /// What the label applies to: nests, users, or both (e.g. --applies-to nests,users).
+    #[arg(long, value_delimiter = ',', value_parser = ["nests", "users"])]
+    pub applies_to: Vec<String>,
+    /// User field definitions as a JSON array (or @file.json). Each item is
+    /// {"id","code","title","type", "required"?, "options"?}; types: text, textarea,
+    /// url, number, select, multiselect, date, checkbox. Replaces the whole list.
+    #[arg(long, value_name = "JSON")]
+    pub user_fields: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -70,6 +115,82 @@ pub async fn fetch_workspace_one(
     Ok(data)
 }
 
+pub async fn create_workspace(
+    client: &NestrClient,
+    workspace_id: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .post(&format!("/workspaces/{workspace_id}/labels"), body)
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+pub async fn update_workspace(
+    client: &NestrClient,
+    workspace_id: &str,
+    label_id: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(
+            &format!("/workspaces/{workspace_id}/labels/{label_id}"),
+            body,
+        )
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+/// Parse `--user-fields`: a JSON array, or `@path` to a file holding one.
+pub fn parse_user_fields(arg: &str) -> crate::error::Result<Value> {
+    let text = match arg.strip_prefix('@') {
+        Some(path) => std::fs::read_to_string(path)?,
+        None => arg.to_string(),
+    };
+    match serde_json::from_str::<Value>(&text) {
+        Ok(v) if v.is_array() => Ok(v),
+        _ => Err(crate::error::NestrError::Validation(
+            "--user-fields expects a JSON array of field definitions".into(),
+        )),
+    }
+}
+
+/// Body for label create/update. Absent options are omitted; the reset/clear
+/// flags send `null`, which the API reads as "back to default".
+#[allow(clippy::too_many_arguments)]
+pub fn label_body(
+    title: Option<String>,
+    description: Option<String>,
+    color: Option<String>,
+    icon: Option<String>,
+    opts: &UserLabelOpts,
+    reset_applies_to: bool,
+    clear_user_fields: bool,
+) -> crate::error::Result<Value> {
+    let mut map = serde_json::Map::new();
+    for (k, v) in [
+        ("title", title),
+        ("description", description),
+        ("color", color),
+        ("icon", icon),
+    ] {
+        if let Some(v) = v {
+            map.insert(k.into(), v.into());
+        }
+    }
+    if reset_applies_to {
+        map.insert("applicableTo".into(), Value::Null);
+    } else if !opts.applies_to.is_empty() {
+        map.insert("applicableTo".into(), serde_json::json!(opts.applies_to));
+    }
+    if clear_user_fields {
+        map.insert("userFields".into(), Value::Null);
+    } else if let Some(f) = &opts.user_fields {
+        map.insert("userFields".into(), parse_user_fields(f)?);
+    }
+    Ok(Value::Object(map))
+}
+
 pub async fn fetch_personal(
     client: &NestrClient,
     params: &[(&str, &str)],
@@ -102,13 +223,46 @@ fn render_labels(data: &Value, output: crate::config::OutputFormat) -> Result<()
                         l.title.clone().unwrap_or_default(),
                         l.color.clone().unwrap_or_default(),
                         l.icon.clone().unwrap_or_default(),
+                        l.applicable_to.join(","),
                     ]
                 })
                 .collect();
             println!(
                 "{}",
-                render::format_table(&["ID", "TITLE", "COLOR", "ICON"], rows)
+                render::format_table(&["ID", "TITLE", "COLOR", "ICON", "APPLIES TO"], rows)
             );
+        }
+    }
+    Ok(())
+}
+
+fn render_user_fields(label: &Value) {
+    let Some(defs) = label["userFields"].as_array().filter(|a| !a.is_empty()) else {
+        return;
+    };
+    println!("user fields:");
+    for d in defs {
+        let s = |k: &str| d.get(k).and_then(Value::as_str).unwrap_or("");
+        println!(
+            "  {}  {}  ({}){}",
+            render::clean_text(s("code")),
+            render::clean_text(s("title")),
+            render::clean_text(s("type")),
+            if d["required"].as_bool() == Some(true) {
+                " required"
+            } else {
+                ""
+            }
+        );
+    }
+}
+
+fn output_label(data: &Value, output: crate::config::OutputFormat) -> Result<()> {
+    match output {
+        crate::config::OutputFormat::Json => print_json(data)?,
+        crate::config::OutputFormat::Text => {
+            render_labels(&Value::Array(vec![data.clone()]), output)?;
+            render_user_fields(data);
         }
     }
     Ok(())
@@ -130,9 +284,57 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
             match cfg.output {
                 crate::config::OutputFormat::Json => print_json(&data)?,
                 crate::config::OutputFormat::Text => {
-                    render_labels(&Value::Array(vec![data]), cfg.output)?
+                    render_labels(&Value::Array(vec![data.clone()]), cfg.output)?;
+                    render_user_fields(&data);
                 }
             }
+        }
+        LabelsCmd::Create {
+            title,
+            description,
+            color,
+            icon,
+            user_opts,
+        } => {
+            safety::enforce_read_only(g.read_only, "labels create")?;
+            let body = label_body(
+                Some(title),
+                description,
+                color,
+                icon,
+                &user_opts,
+                false,
+                false,
+            )?;
+            let data = create_workspace(&client, cfg.require_workspace()?, &body).await?;
+            output_label(&data, cfg.output)?;
+        }
+        LabelsCmd::Update {
+            label_id,
+            title,
+            description,
+            color,
+            icon,
+            user_opts,
+            reset_applies_to,
+            clear_user_fields,
+        } => {
+            safety::enforce_read_only(g.read_only, "labels update")?;
+            let body = label_body(
+                title,
+                description,
+                color,
+                icon,
+                &user_opts,
+                reset_applies_to,
+                clear_user_fields,
+            )?;
+            if body.as_object().is_some_and(|m| m.is_empty()) {
+                anyhow::bail!("labels update: nothing to change, pass at least one option");
+            }
+            let data =
+                update_workspace(&client, cfg.require_workspace()?, &label_id, &body).await?;
+            output_label(&data, cfg.output)?;
         }
         LabelsCmd::Personal { cmd } => match cmd {
             PersonalCmd::List { search } => {

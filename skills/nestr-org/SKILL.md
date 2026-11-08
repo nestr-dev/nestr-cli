@@ -68,6 +68,13 @@ nestr users update <id> --email new@example.com
 nestr users roles <id>                   # roles a user fills
 nestr users groups show <id>             # a user's groups
 nestr users groups set <id> editors leads    # replace their groups
+nestr users list --label legal_rep       # members carrying a people label (labels/fields show on list and get)
+nestr users labels add <userId> legal_rep --field url=https://example.com/r/1   # admin by default
+nestr users labels set <userId> legal_rep --field url=   # change a field value; empty clears it
+nestr users labels remove <userId> legal_rep   # values are kept, hidden, and return on re-add
+nestr users labels activity <userId> --limit 20   # audit trail (workspace admins)
+nestr labels create "Legal rep" --applies-to nests,users --user-fields '[{"id":"url","code":"url","title":"Register","type":"url"}]'
+nestr labels update legal_rep --reset-applies-to   # back to nests only
 nestr groups create "editors"
 ```
 
@@ -99,5 +106,6 @@ means "not found in the documents", not "the organisation has no position".
 ## Safety
 
 Admin writes (`circles`/`roles` `create`/`update`, `users add`/`update`,
-`users groups set`, `groups create`, `workspaces apps set`) are blocked by
+`users groups set`, `users labels add`/`set`/`remove`, `labels create`/`update`,
+`groups create`, `workspaces apps set`) are blocked by
 `--read-only`. Add `-o json` to any command to pipe structured data to `jq`.
