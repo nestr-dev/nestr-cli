@@ -42,7 +42,7 @@ async fn search_warnings_are_collected() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let (data, _) = search::run_search(&client, "ws1", "label:x", None, &[])
+    let (data, _, _) = search::run_search(&client, "ws1", "label:x", None, &[])
         .await
         .unwrap();
     assert_eq!(data, json!([]));

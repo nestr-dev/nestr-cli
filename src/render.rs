@@ -272,6 +272,41 @@ pub fn pagination_footer(meta: Option<&Value>, supports_page: bool) -> Option<St
     Some(s.dimmed().to_string())
 }
 
+/// The server's own report of a filter it could not apply, read off the raw
+/// response body before the envelope is unwrapped.
+///
+/// Worth printing even without `strict:true`, and in both output modes. A dropped
+/// predicate comes back as a real and usually larger answer; a malformed `in:`
+/// comes back as an empty one, which reads exactly like "nothing matched". Either
+/// way the only thing distinguishing it from a correct result is this list, so
+/// dropping it on the floor is how a wrong answer looks right.
+///
+/// Falls back to the warning's `code` when it carries no message, because staying
+/// silent on an unexpected shape is the failure being fixed.
+pub fn search_warning_lines(body: &Value) -> Vec<String> {
+    body.get("searchWarnings")
+        .and_then(Value::as_array)
+        .map(|ws| {
+            ws.iter()
+                .filter_map(|w| {
+                    w.get("message")
+                        .and_then(Value::as_str)
+                        .or_else(|| w.get("code").and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Print search warnings to stderr, so `-o json` keeps a clean machine-readable
+/// stdout while a person still sees them.
+pub fn print_search_warnings(lines: &[String]) {
+    for line in lines {
+        eprintln!("{}", format!("warning: {line}").yellow());
+    }
+}
+
 /// Footer for skip/limit-paginated lists that return no `meta` (notifications).
 /// Prints when the page is full (rows == limit), pointing at the next `--skip`.
 /// `limit` defaults to the server's 50 when not given. (COR-10)
@@ -1387,6 +1422,52 @@ pub fn post_table(posts: &[crate::views::PostView]) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn search_warnings_report_a_filter_the_server_dropped() {
+        // A dropped filter comes back as a real, usually larger answer. The CLI
+        // threw the server's own report of it away, so there was nothing to see.
+        let body = json!({
+            "status": "success",
+            "searchWarnings": [
+                {"code": "unknown_operator", "message": "Unknown search operator 'project.status:'. This term was ignored."}
+            ],
+            "data": []
+        });
+        assert_eq!(
+            search_warning_lines(&body),
+            vec!["Unknown search operator 'project.status:'. This term was ignored.".to_string()]
+        );
+    }
+
+    #[test]
+    fn search_warnings_report_every_entry() {
+        let body = json!({
+            "searchWarnings": [
+                {"code": "malformed_in_value", "message": "first"},
+                {"code": "unknown_label", "message": "second"}
+            ],
+            "data": []
+        });
+        assert_eq!(search_warning_lines(&body), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn search_warnings_fall_back_to_the_code_when_a_message_is_missing() {
+        // Saying nothing because the shape was unexpected is the bug being fixed.
+        let body = json!({ "searchWarnings": [{"code": "malformed_in_value"}], "data": [] });
+        assert_eq!(search_warning_lines(&body), vec!["malformed_in_value"]);
+    }
+
+    #[test]
+    fn no_search_warnings_is_no_lines() {
+        assert_eq!(search_warning_lines(&json!({"data": []})).len(), 0);
+        assert_eq!(
+            search_warning_lines(&json!({"searchWarnings": [], "data": []})).len(),
+            0
+        );
+        assert_eq!(search_warning_lines(&json!([{"_id": "n1"}])).len(), 0);
+    }
 
     #[test]
     fn nest_url_builds_canonical_n_path() {

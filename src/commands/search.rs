@@ -41,14 +41,19 @@ pub fn strict_query(query: &str, strict: bool) -> String {
     }
 }
 
-/// Run the search and return `(data, meta)`, both already unwrapped.
+/// Run the search and return `(data, meta, warnings)`.
+///
+/// `warnings` is read off the raw body before the envelope is unwrapped, because
+/// `unwrap_data` keeps only `data`, `meta` and `links`. Without them a filter the
+/// server could not apply is invisible: a dropped predicate returns a larger
+/// answer and a malformed `in:` returns an empty one, and both look correct.
 pub async fn run_search(
     client: &NestrClient,
     workspace_id: &str,
     query: &str,
     in_nest: Option<&str>,
     extra: &[(&str, &str)],
-) -> crate::error::Result<(Value, Option<Value>)> {
+) -> crate::error::Result<(Value, Option<Value>, Vec<String>)> {
     let mut params: Vec<(&str, &str)> = vec![("search", query)];
     params.extend_from_slice(extra);
     let raw: Value = match in_nest {
@@ -59,8 +64,9 @@ pub async fn run_search(
                 .await?
         }
     };
+    let warnings = render::search_warning_lines(&raw);
     let (data, meta, _links) = unwrap_data(raw);
-    Ok((data, meta))
+    Ok((data, meta, warnings))
 }
 
 pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
@@ -90,7 +96,11 @@ pub async fn run(args: SearchArgs, g: &GlobalArgs) -> Result<()> {
     } else {
         cfg.require_workspace()?
     };
-    let (data, meta) = run_search(&client, workspace, &query, args.r#in.as_deref(), &extra).await?;
+    let (data, meta, warnings) =
+        run_search(&client, workspace, &query, args.r#in.as_deref(), &extra).await?;
     render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
+    // After the rows, so it is the last thing on screen, and on stderr so a
+    // `-o json` consumer still gets clean stdout.
+    render::print_search_warnings(&warnings);
     Ok(())
 }
