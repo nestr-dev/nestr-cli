@@ -313,11 +313,26 @@ impl NestrClient {
             .send()
             .await
             .map_err(|e| NestrError::Http(e.without_url()))?;
-        let text = self.checked_text(resp).await.map_err(|e| match e {
-            NestrError::Http(e) => NestrError::Http(e.without_url()),
-            other => other,
-        })?;
-        self.parse_with_notices(&text)
+        let status = resp.status();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| NestrError::Http(e.without_url()));
+        if status.is_success() {
+            return self.parse_with_notices(&body?);
+        }
+        let body = body.unwrap_or_default();
+        // Only a JSON detail is shown: a body without one may be a proxy's HTML page.
+        let msg = extract_error_detail(&body)
+            .unwrap_or_else(|| format!("HTTP {} with no details", status.as_u16()));
+        Err(match status {
+            // No credential of the user's went along, so this is not their login failing.
+            StatusCode::UNAUTHORIZED => NestrError::Api {
+                status: 401,
+                message: format!("the upload URL was not accepted: {msg}"),
+            },
+            _ => self.status_error(status, &body, msg),
+        })
     }
 
     /// DELETE returning the raw checked body (no JSON parse) — for routes that
@@ -351,14 +366,19 @@ impl NestrClient {
         if status.is_success() {
             return Ok(resp.text().await?);
         }
-        let code = status.as_u16();
         let body = resp.text().await.unwrap_or_default();
         let detail = extract_error_detail(&body);
         let has_detail = detail.is_some();
         let msg = detail.unwrap_or_else(|| body.clone());
+        Err(self.status_error(status, &body, msg))
+    }
+
+    /// Map a non-success status to its error, with `msg` as the detail shown.
+    fn status_error(&self, status: StatusCode, body: &str, msg: String) -> NestrError {
+        let code = status.as_u16();
         if status == StatusCode::FORBIDDEN {
-            if let Some(e) = read_only_key_error(&body).or_else(|| user_scope_error(&msg)) {
-                return Err(e);
+            if let Some(e) = read_only_key_error(body).or_else(|| user_scope_error(&msg)) {
+                return e;
             }
             // A refusal thrown inside the server (a write guard's) answers 403 with the
             // framework's plain-text body, "Server error." in production. Passing that on
@@ -373,17 +393,17 @@ impl NestrClient {
             }
         }
         match status {
-            StatusCode::UNAUTHORIZED => Err(session_rejected(self.refresh.is_some(), &msg)),
-            StatusCode::FORBIDDEN => Err(NestrError::Permission(msg)),
-            StatusCode::NOT_FOUND => Err(NestrError::NotFound(msg)),
-            StatusCode::PAYMENT_REQUIRED => Err(NestrError::PlanRequired(msg)),
+            StatusCode::UNAUTHORIZED => session_rejected(self.refresh.is_some(), &msg),
+            StatusCode::FORBIDDEN => NestrError::Permission(msg),
+            StatusCode::NOT_FOUND => NestrError::NotFound(msg),
+            StatusCode::PAYMENT_REQUIRED => NestrError::PlanRequired(msg),
             StatusCode::UNPROCESSABLE_ENTITY | StatusCode::BAD_REQUEST => {
-                Err(NestrError::Validation(msg))
+                NestrError::Validation(msg)
             }
-            _ => Err(NestrError::Api {
+            _ => NestrError::Api {
                 status: code,
                 message: msg,
-            }),
+            },
         }
     }
 }

@@ -415,6 +415,60 @@ async fn upload_404_keeps_the_reason_and_only_suggests_a_retry_if_the_nest_exist
 }
 
 #[tokio::test]
+async fn upload_refusal_without_a_json_reason_shows_no_proxy_page() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(410).set_body_string("<html>Gone</html>"))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(!msg.contains("<html>"), "{msg}");
+    assert!(msg.contains("HTTP 410"), "{msg}");
+}
+
+#[tokio::test]
+async fn upload_401_is_not_blamed_on_the_login() {
+    // No API key goes to the upload URL, so a 401 there says nothing about the login.
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("upload URL was not accepted"), "{msg}");
+    assert!(
+        !msg.contains("auth login") && !msg.contains("API key"),
+        "{msg}"
+    );
+}
+
+#[tokio::test]
 async fn upload_refused_at_upload_time_keeps_the_servers_reason() {
     // The upload re-checks rights and the nest, so a 403 or 404 there is not
     // necessarily about the URL.
