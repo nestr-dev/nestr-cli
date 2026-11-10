@@ -320,8 +320,8 @@ impl NestrClient {
             if !has_detail {
                 return Err(NestrError::Permission(
                     "Nestr refused this request without saying why. Usually this login \
-                     doesn't have the rights for this change; check that you can make it \
-                     in the app."
+                     doesn't have the rights for it; check that you can do the same in the \
+                     app."
                         .into(),
                 ));
             }
