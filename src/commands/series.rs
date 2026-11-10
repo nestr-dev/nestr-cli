@@ -174,8 +174,10 @@ impl AddOutcome {
             format!("all {} points were refused; nothing was added", self.failed)
         } else {
             format!(
-                "{} of {total} points were refused; the other {} were added",
-                self.failed, self.created
+                "{} of {total} points were refused; {} {} added",
+                self.failed,
+                self.created,
+                if self.created == 1 { "was" } else { "were" }
             )
         })
     }

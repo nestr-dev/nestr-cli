@@ -231,6 +231,15 @@ fn a_fully_refused_backfill_says_nothing_was_added() {
         outcome.failure(2).unwrap(),
         "all 2 points were refused; nothing was added"
     );
+    let partly = series::AddOutcome {
+        created: 1,
+        failed: 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        partly.failure(2).unwrap(),
+        "1 of 2 points were refused; 1 was added"
+    );
     let ok = series::AddOutcome {
         created: 2,
         ..Default::default()
