@@ -328,3 +328,195 @@ async fn read_only_blocks_mode_set_before_writing() {
 
     std::env::remove_var("NESTR_HOME");
 }
+
+fn no_changes() -> agents::AgentChanges {
+    agents::AgentChanges {
+        name: None,
+        description: None,
+        assistant: false,
+        assignable: false,
+        web_search: None,
+        status: None,
+        config: None,
+    }
+}
+
+#[test]
+fn update_body_sends_only_what_was_passed() {
+    let changes = agents::AgentChanges {
+        description: Some("Careful with money".into()),
+        ..no_changes()
+    };
+    assert_eq!(
+        agents::update_body(changes).unwrap(),
+        json!({"description":"Careful with money"})
+    );
+}
+
+#[test]
+fn update_body_maps_every_flag() {
+    let changes = agents::AgentChanges {
+        name: Some("Collab".into()),
+        description: Some("Calm".into()),
+        assistant: true,
+        web_search: Some(false),
+        status: Some("paused".into()),
+        config: Some("{\"tokenTtlSeconds\":300}".into()),
+        ..no_changes()
+    };
+    assert_eq!(
+        agents::update_body(changes).unwrap(),
+        json!({
+            "name":"Collab",
+            "description":"Calm",
+            "roleAssignable":false,
+            "webSearch":false,
+            "status":"paused",
+            "agentConfig":{"tokenTtlSeconds":300}
+        })
+    );
+}
+
+#[test]
+fn update_body_assignable_sends_role_assignable_true() {
+    let changes = agents::AgentChanges {
+        assignable: true,
+        ..no_changes()
+    };
+    assert_eq!(
+        agents::update_body(changes).unwrap(),
+        json!({"roleAssignable":true})
+    );
+}
+
+#[test]
+fn update_body_refuses_an_empty_update() {
+    let err = agents::update_body(no_changes()).unwrap_err();
+    assert!(err.to_string().contains("Nothing to update"), "{err}");
+}
+
+#[test]
+fn update_body_rejects_a_config_that_is_not_an_object() {
+    let changes = agents::AgentChanges {
+        config: Some("[1]".into()),
+        ..no_changes()
+    };
+    let err = agents::update_body(changes).unwrap_err();
+    assert!(err.to_string().contains("--config"), "{err}");
+}
+
+#[tokio::test]
+async fn update_patches_agent_and_unwraps() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/workspaces/ws1/agents/a1"))
+        .and(body_json(json!({"description":"Calm"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status":"success","data":{"_id":"a1","profile":{"fullName":"Collab"}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let data = agents::update_agent(&client, "ws1", "a1", &json!({"description":"Calm"}))
+        .await
+        .unwrap();
+    assert_eq!(data["_id"], "a1");
+}
+
+/// Run the real binary against the mock server with an api-key profile written into
+/// its own temp dir, so it doesn't race the tests here that set NESTR_HOME.
+fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
+    use nestr_cli::config::{config_dir_in, AuthKind, CredentialStorage, Profile};
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = Profile {
+        auth: AuthKind::ApiKey,
+        credential_storage: CredentialStorage::File,
+        host: host.into(),
+        workspace_id: "ws".into(),
+        api_key: Some("k".into()),
+        oauth_client_id: None,
+        oauth_token_url: None,
+        oauth_authorize_url: None,
+        oauth_tokens: None,
+        client_instance_id: None,
+        default_output_format: None,
+    };
+    let profiles = config_dir_in(Some(tmp.path().into())).join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("t.toml"),
+        toml::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+    std::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
+        .args(["--profile", "t", "--yes"])
+        .args(args)
+        .env("NESTR_HOME", tmp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_PROFILE")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_READ_ONLY")
+        .env_remove("NESTR_AGENT_MODE")
+        .output()
+        .unwrap()
+}
+
+// An empty update is refused before any request: expect(0) fails the test if it fires.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_with_no_flags_sends_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let out = run_cli(&server.uri(), &["agents", "update", "a1"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Nothing to update"), "stderr: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_sends_the_patch_and_prints_the_agent() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/workspaces/ws/agents/a1"))
+        .and(body_json(json!({"status":"paused","webSearch":true})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status":"success","data":{"_id":"a1","profile":{"fullName":"Collab"}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = run_cli(
+        &server.uri(),
+        &[
+            "agents",
+            "update",
+            "a1",
+            "--status",
+            "paused",
+            "--web-search",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Collab"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn assistant_and_assignable_conflict() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let out = run_cli(
+        &server.uri(),
+        &["agents", "update", "a1", "--assistant", "--assignable"],
+    );
+    assert!(!out.status.success());
+}

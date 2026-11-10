@@ -689,3 +689,56 @@ async fn create_proxy_assign_sends_the_role_id() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "stderr: {stderr}");
 }
+
+/// Run `nestr nests create <args>` and assert the POST body is exactly `body`.
+async fn assert_create_sends(args: &[&str], body: serde_json::Value) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/nests"))
+        .and(wiremock::matchers::body_json(body))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status":"success","data":{"_id":"n1","title":"T","completed":true}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut argv = vec!["-o", "json", "nests", "create", "--title", "T"];
+    argv.extend_from_slice(args);
+    let out = run_cli(&server.uri(), &argv);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_completed_sends_completed_true() {
+    assert_create_sends(
+        &["--completed"],
+        serde_json::json!({"title": "T", "completed": true}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_without_completed_leaves_it_out() {
+    assert_create_sends(&[], serde_json::json!({"title": "T"})).await;
+}
+
+// A multi nest-link field takes the whole set as a JSON list: the server links the ids
+// not yet linked and unlinks the ones left out. `null` clears it.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_field_sends_a_json_list_as_a_list() {
+    assert_update_sends(
+        &["--field", r#"ops.linked=["n7","n8"]"#],
+        serde_json::json!({"fields": {"ops.linked": ["n7", "n8"]}}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_field_null_clears_the_links() {
+    assert_update_sends(
+        &["--field", "ops.linked=null"],
+        serde_json::json!({"fields": {"ops.linked": null}}),
+    )
+    .await;
+}
