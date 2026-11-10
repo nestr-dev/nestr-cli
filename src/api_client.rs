@@ -324,7 +324,7 @@ impl NestrClient {
         let body = body.unwrap_or_default();
         // Only a JSON detail is shown: a body without one may be a proxy's HTML page.
         let msg = extract_error_detail(&body)
-            .unwrap_or_else(|| format!("HTTP {} with no details", status.as_u16()));
+            .unwrap_or_else(|| format!("HTTP {} with no details.", status.as_u16()));
         Err(match status {
             // No credential of the user's went along, so this is not their login failing.
             StatusCode::UNAUTHORIZED => NestrError::Api {
