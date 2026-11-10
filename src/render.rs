@@ -816,7 +816,7 @@ pub fn output_children(data: &Value, output: OutputFormat) -> Result<()> {
 }
 
 /// Render an optional metric value, dropping a trailing `.0` on integral floats.
-fn fmt_num(v: Option<f64>) -> String {
+pub fn fmt_num(v: Option<f64>) -> String {
     match v {
         None => String::new(),
         Some(n) if n.fract() == 0.0 => format!("{}", n as i64),
@@ -870,55 +870,179 @@ pub fn insight_table(insights: &[InsightView]) -> String {
             vec![
                 i.type_.clone().unwrap_or_default(),
                 i.title.clone().unwrap_or_default(),
+                i.data_type.clone().unwrap_or_default(),
                 fmt_num(i.current_value),
                 fmt_num(i.compare_value),
                 i.goal.clone().unwrap_or_default(),
             ]
         })
         .collect();
-    format_table(&["TYPE", "TITLE", "CURRENT", "COMPARE", "GOAL"], rows)
+    format_table(
+        &["TYPE", "TITLE", "KIND", "CURRENT", "COMPARE", "GOAL"],
+        rows,
+    )
 }
 
-pub fn output_insights(data: &Value, output: OutputFormat) -> Result<()> {
-    match output {
-        OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let insights: Vec<InsightView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if insights.is_empty() {
-                print_no_results("No insights.");
-                return Ok(());
-            }
-            println!("{}", insight_table(&insights));
-        }
-    }
-    Ok(())
+/// `from → to` of a `{from, to}` period in an insights meta, as the server sent it.
+fn period_span(meta: Option<&Value>, key: &str) -> Option<String> {
+    let p = meta?.get(key)?;
+    let from = p.get("from").and_then(Value::as_str)?;
+    let to = p.get("to").and_then(Value::as_str)?;
+    Some(format!("{} → {}", clean_text(from), clean_text(to)))
 }
 
-pub fn insight_detail(data: &Value, output: OutputFormat) -> Result<()> {
-    match output {
-        OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!(
-                "{}  [{}]",
-                clean_text(&i.title.clone().unwrap_or_default()),
-                clean_text(&i.type_.clone().unwrap_or_default())
-            );
-            if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
-                println!("description: {}", clean_text(d));
-            }
-            println!(
-                "current: {}  (was {})",
-                fmt_num(i.current_value),
-                fmt_num(i.compare_value)
-            );
-            if let Some(g) = &i.goal {
-                println!("goal: {}", clean_text(g));
-            }
+/// The two lines naming the exact dates an insight analysed and compared against.
+fn period_lines(meta: Option<&Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(p) = period_span(meta, "period") {
+        out.push(format!("period:   {p}"));
+    }
+    if let Some(c) = period_span(meta, "comparePeriod") {
+        out.push(format!("compared: {c}"));
+    }
+    out
+}
+
+/// How a value of this kind reads against the periods, in the server's words
+/// (`meta.valueSemantics`), so the CLI never states it differently.
+fn semantics_line(meta: Option<&Value>, kind: &str) -> Option<String> {
+    let s = meta?.get("valueSemantics")?.get(kind)?.as_str()?;
+    Some(format!("{}: {}", clean_text(kind), clean_text(s)))
+}
+
+/// `insights list` in text: the periods, the table, then how each kind present reads.
+pub fn insights_text(data: &Value, meta: Option<&Value>) -> String {
+    let insights: Vec<InsightView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if insights.is_empty() {
+        return "No insights.".yellow().to_string();
+    }
+    let mut out = period_lines(meta);
+    out.push(insight_table(&insights));
+    let mut kinds: Vec<&str> = Vec::new();
+    for k in insights.iter().filter_map(|i| i.data_type.as_deref()) {
+        if !kinds.contains(&k) {
+            kinds.push(k);
         }
     }
-    Ok(())
+    out.extend(kinds.iter().filter_map(|k| semantics_line(meta, k)));
+    out.join("\n")
+}
+
+/// `insights get` in text: the value and its compare value, each with its period.
+pub fn insight_detail_text(data: &Value, meta: Option<&Value>) -> String {
+    let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
+    let mut out = vec![format!(
+        "{}  [{}]",
+        clean_text(&i.title.clone().unwrap_or_default()),
+        clean_text(&i.type_.clone().unwrap_or_default())
+    )];
+    if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
+        out.push(format!("description: {}", clean_text(d)));
+    }
+    let period = period_span(meta, "period");
+    let compared = period_span(meta, "comparePeriod");
+    let with = |v: String, span: Option<String>| match span {
+        Some(s) => format!("{v}  ({s})"),
+        None => v,
+    };
+    out.push(with(
+        format!("current: {}", fmt_num(i.current_value)),
+        period,
+    ));
+    out.push(with(
+        format!("compare: {}", fmt_num(i.compare_value)),
+        compared,
+    ));
+    if let Some(line) = i.data_type.as_deref().and_then(|k| semantics_line(meta, k)) {
+        out.push(line);
+    }
+    if let Some(g) = &i.goal {
+        out.push(format!("goal: {}", clean_text(g)));
+    }
+    out.join("\n")
+}
+
+/// A compare row's percent change: a number, or the string `Infinity` the
+/// server sends for a change from zero.
+fn fmt_percent(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::Number(n)) => {
+            let f = n.as_f64().unwrap_or_default();
+            let sign = if f > 0.0 { "+" } else { "" };
+            format!("{sign}{}%", fmt_num(Some(f)))
+        }
+        Some(Value::String(s)) => clean_text(s),
+        _ => String::new(),
+    }
+}
+
+/// `insights compare` in text: one row per circle, the parent set apart because
+/// its value includes its children.
+pub fn compare_text(data: &Value, meta: Option<&Value>) -> String {
+    let rows_in = data.as_array().cloned().unwrap_or_default();
+    if rows_in.is_empty() {
+        return "No circles to compare.".yellow().to_string();
+    }
+    let mut out = Vec::new();
+    if let Some(m) = meta {
+        let mut head = vec![format!("metric: {}", clean_text(str_of(m, "metricId")))];
+        let kind = str_of(m, "valueType");
+        if !kind.is_empty() {
+            head.push(format!("kind: {}", clean_text(kind)));
+        }
+        let goal = str_of(m, "goal");
+        if !goal.is_empty() {
+            head.push(format!("goal: {}", clean_text(goal)));
+        }
+        out.push(head.join("  "));
+    }
+    out.extend(period_lines(meta));
+    let mut set_apart = false;
+    let rows = rows_in
+        .iter()
+        .map(|r| {
+            let apart = r.get("excludeFromComparison").and_then(Value::as_bool) == Some(true)
+                || r.get("isParent").and_then(Value::as_bool) == Some(true);
+            set_apart |= apart;
+            let title = str_of(r, "title").to_string();
+            vec![
+                if apart {
+                    format!("{title} (parent)")
+                } else {
+                    title
+                },
+                str_of(r, "nestId").to_string(),
+                fmt_num(r.get("value").and_then(Value::as_f64)),
+                fmt_num(r.get("compareValue").and_then(Value::as_f64)),
+                fmt_num(r.get("delta").and_then(Value::as_f64)),
+                fmt_percent(r.get("deltaPercent")),
+                str_of(r, "direction").to_string(),
+            ]
+        })
+        .collect();
+    out.push(format_table(
+        &[
+            "CIRCLE",
+            "ID",
+            "VALUE",
+            "COMPARE",
+            "DELTA",
+            "CHANGE",
+            "DIRECTION",
+        ],
+        rows,
+    ));
+    if let Some(line) = meta.and_then(|m| semantics_line(meta, str_of(m, "valueType"))) {
+        out.push(line);
+    }
+    if set_apart {
+        out.push(
+            "(parent) includes its child circles, so don't rank it against them."
+                .dimmed()
+                .to_string(),
+        );
+    }
+    out.join("\n")
 }
 
 /// Render an insight-history point array (`{date, value}`) as a DATE·VALUE table.

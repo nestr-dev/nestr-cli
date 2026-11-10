@@ -233,3 +233,91 @@ fn nests_activity_limit_is_capped_at_200() {
         "expected a clap range error, got: {stderr}"
     );
 }
+
+/// Parsed fine, then stopped for want of a profile: clap exits 2 on a usage error.
+fn assert_parses(args: &[&str]) {
+    let out = run(args);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(
+        out.status.code(),
+        Some(2),
+        "expected {args:?} to parse, got: {stderr}"
+    );
+    assert!(!stderr.contains("Usage:"), "{args:?}: {stderr}");
+}
+
+#[test]
+fn insights_list_nest_conflicts_with_user() {
+    let out = run(&["insights", "list", "--nest", "c1", "--user", "me"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("cannot be used with"),
+        "expected a clap conflict error, got: {stderr}"
+    );
+}
+
+#[test]
+fn insights_history_nest_conflicts_with_user() {
+    let out = run(&[
+        "insights", "history", "comments", "--nest", "c1", "--user", "me",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("cannot be used with"),
+        "expected a clap conflict error, got: {stderr}"
+    );
+}
+
+#[test]
+fn insights_list_keeps_its_old_flags_as_aliases() {
+    assert_parses(&["insights", "list", "--end-date", "2026-11-01"]);
+    assert_parses(&["insights", "list", "--circle", "c1"]);
+    assert_parses(&["insights", "list", "--include-sub-circles", "false"]);
+    assert_parses(&["insights", "list", "--include-sub-circles"]);
+}
+
+#[test]
+fn insights_end_date_is_hidden_from_help() {
+    let out = run(&["insights", "list", "--help"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("--to"), "{stdout}");
+    assert!(!stdout.contains("--end-date"), "{stdout}");
+}
+
+#[test]
+fn insights_end_date_cannot_be_given_with_to() {
+    let out = run(&[
+        "insights",
+        "list",
+        "--to",
+        "2026-11-01",
+        "--end-date",
+        "2026-10-01",
+    ]);
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn series_edit_takes_a_negative_value() {
+    assert_parses(&[
+        "nests",
+        "series",
+        "edit",
+        "n1",
+        "metric-data",
+        "p1",
+        "--value",
+        "-3.5",
+    ]);
+}
+
+#[test]
+fn series_points_order_rejects_unknown_value() {
+    let out = run(&["nests", "series", "points", "n1", "k", "--order", "newest"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("invalid value"), "{stderr}");
+}
