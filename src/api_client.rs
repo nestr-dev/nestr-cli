@@ -261,7 +261,12 @@ impl NestrClient {
         body: Option<&Value>,
     ) -> Result<T> {
         let text = self.request_text(method, path, query, body).await?;
-        let json = if text.trim().is_empty() { "{}" } else { &text };
+        Ok(serde_json::from_value(self.parse_with_notices(&text)?)?)
+    }
+
+    /// Parse a checked body as JSON and collect (and maybe print) its notices.
+    fn parse_with_notices(&self, text: &str) -> Result<Value> {
+        let json = if text.trim().is_empty() { "{}" } else { text };
         let value: Value = serde_json::from_str(json)?;
         if let Some(n) = notices::extract(&value) {
             if let Some(output) = self.print_notices {
@@ -271,7 +276,48 @@ impl NestrClient {
                 all.push(n);
             }
         }
-        Ok(serde_json::from_value(value)?)
+        Ok(value)
+    }
+
+    /// POST raw bytes to an absolute URL the API handed out (a single-use upload URL).
+    ///
+    /// The URL is the credential, so no bearer goes along, and the URL never shows up
+    /// in an error: reqwest's error text includes it, so it is stripped. The URL must
+    /// be https (or http to loopback), like the API host itself. `len` is sent as the
+    /// Content-Length, so the server can refuse an oversize body before reading it.
+    pub async fn post_raw_to_url(
+        &self,
+        url: &str,
+        body: reqwest::Body,
+        len: u64,
+        content_type: &str,
+    ) -> Result<Value> {
+        crate::validation::require_secure_credential_url(url).map_err(|_| {
+            NestrError::Validation(
+                "the server handed out an upload URL that is not https, so the file would \
+                 travel unencrypted; refusing to send it"
+                    .into(),
+            )
+        })?;
+        let content_type = header::HeaderValue::from_str(content_type).map_err(|_| {
+            NestrError::Validation(format!("'{content_type}' is not a valid content type"))
+        })?;
+        let resp = self
+            .inner
+            .post(url)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, len)
+            // A slow link should not cut a large upload at the client's 60 s default.
+            .timeout(Duration::from_secs(10 * 60))
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| NestrError::Http(e.without_url()))?;
+        let text = self.checked_text(resp).await.map_err(|e| match e {
+            NestrError::Http(e) => NestrError::Http(e.without_url()),
+            other => other,
+        })?;
+        self.parse_with_notices(&text)
     }
 
     /// DELETE returning the raw checked body (no JSON parse) — for routes that

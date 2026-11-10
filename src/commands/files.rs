@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use clap::Subcommand;
 use serde_json::{json, Value};
@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::GlobalArgs;
 use crate::config::{OutputFormat, ResolvedConfig};
+use crate::error::NestrError;
 use crate::render::{self, print_json};
 use crate::safety;
 
@@ -117,28 +118,128 @@ pub async fn read_file_text(
     Ok(data)
 }
 
+/// Ask for a single-use URL that takes one file's raw bytes:
+/// `{url, method, expiresAt, maxBytes, curl}`. With `inline`, the file is stored for
+/// the nest's text (an image) rather than as an attachment.
+pub async fn request_upload_url(
+    client: &NestrClient,
+    nest_id: &str,
+    name: &str,
+    content_type: &str,
+    inline: bool,
+) -> crate::error::Result<Value> {
+    let mut body = json!({"name": name, "contentType": content_type});
+    // Only sent when asked, so a plain upload's body stays minimal.
+    if inline {
+        body["inline"] = json!(true);
+    }
+    let raw: Value = client
+        .post(&format!("/nests/{nest_id}/files/upload-url"), &body)
+        .await?;
+    let (data, _, _) = unwrap_data(raw);
+    Ok(data)
+}
+
+/// Upload a local file to a nest (a comment id works too) and return its descriptor.
+///
+/// The bytes are streamed to a single-use upload URL rather than base64'd into a JSON
+/// body, so nothing is held in memory and nothing is inflated by a third. The file is
+/// checked locally first: an empty one, or one over the limit the server names when it
+/// issues the URL, is refused before any byte goes out.
 pub async fn upload_file(
     client: &NestrClient,
     nest_id: &str,
     name: &str,
     content_type: &str,
-    bytes: &[u8],
+    path: &Path,
     inline: bool,
-) -> crate::error::Result<Value> {
-    let mut body = json!({
-        "name": name,
-        "contentType": content_type,
-        "dataBase64": STANDARD.encode(bytes),
-    });
-    // Only sent when asked, so a plain upload's body is exactly what it was.
-    if inline {
-        body["inline"] = json!(true);
+) -> Result<Value> {
+    let meta = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+    if !meta.is_file() {
+        bail!("{} is not a regular file.", path.display());
     }
-    let raw: Value = client
-        .post(&format!("/nests/{nest_id}/files"), &body)
-        .await?;
+    let size = meta.len();
+    if size == 0 {
+        bail!(
+            "{} is empty; Nestr does not store an empty file.",
+            path.display()
+        );
+    }
+
+    let ticket = request_upload_url(client, nest_id, name, content_type, inline)
+        .await
+        .map_err(|e| match e {
+            // An older server routes this path to the file route, which takes no POST.
+            NestrError::Api { status: 405, .. } => anyhow!(
+                "this Nestr server does not hand out upload URLs, which `nests files upload` \
+                 needs; it is older than this CLI."
+            ),
+            other => other.into(),
+        })?;
+    let url = ticket
+        .get("url")
+        .and_then(Value::as_str)
+        .context("the server's upload-url response carried no url")?;
+    let max = ticket.get("maxBytes").and_then(Value::as_u64);
+    if let Some(max) = max.filter(|&m| size > m) {
+        bail!(too_large(name, size, Some(max)));
+    }
+
+    let file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("reading {}", path.display()))?;
+    let raw = client
+        .post_raw_to_url(url, file.into(), size, content_type)
+        .await
+        .map_err(|e| upload_refused(e, name, size, max))?;
     let (data, _, _) = unwrap_data(raw);
     Ok(data)
+}
+
+fn too_large(name: &str, size: u64, limit: Option<u64>) -> String {
+    match limit {
+        Some(limit) => format!(
+            "{name} ({}) is too large: this Nestr server accepts files up to {}.",
+            format_bytes(size),
+            format_bytes(limit)
+        ),
+        None => format!(
+            "{name} ({}) is too large for this Nestr server.",
+            format_bytes(size)
+        ),
+    }
+}
+
+/// `File "x" exceeds the maximum upload size of N bytes` → N.
+fn limit_in_message(message: &str) -> Option<u64> {
+    let rest = message.split("maximum upload size of ").nth(1)?;
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+/// Turn a refused upload into what to do about it. A 413 names the limit (the
+/// server's, or the one issued with the URL when a proxy answered) and never echoes
+/// the body, which may be a proxy's HTML page. A 404 or 410 may be a used or expired
+/// URL, or the nest gone since: the server's reason stays, plus the way out.
+fn upload_refused(e: NestrError, name: &str, size: u64, issued_max: Option<u64>) -> anyhow::Error {
+    match e {
+        NestrError::Api {
+            status: 413,
+            message,
+        } => anyhow!(too_large(
+            name,
+            size,
+            limit_in_message(&message).or(issued_max)
+        )),
+        NestrError::Api {
+            status: 410,
+            message,
+        }
+        | NestrError::NotFound(message) => anyhow!(
+            "the upload was refused: {} Run the command again; each run gets a fresh upload URL.",
+            message.trim_end_matches(" Request a new one.")
+        ),
+        other => other.into(),
+    }
 }
 
 pub async fn delete_file(
@@ -448,9 +549,7 @@ pub async fn run(
             };
             let content_type =
                 content_type.unwrap_or_else(|| guess_content_type(&name).to_string());
-            let bytes =
-                std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-            let data = upload_file(client, &nest_id, &name, &content_type, &bytes, inline).await?;
+            let data = upload_file(client, &nest_id, &name, &content_type, &path, inline).await?;
             match cfg.output {
                 OutputFormat::Json => print_json(&data)?,
                 OutputFormat::Text => {

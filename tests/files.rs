@@ -90,16 +90,52 @@ async fn read_text_asks_for_extracted_text_from_an_offset() {
     assert_eq!(data["nextOffset"], 8100);
 }
 
-#[tokio::test]
-async fn upload_posts_name_type_and_base64_bytes() {
-    let server = MockServer::start().await;
+/// A temp dir holding `name` with `bytes`; keep the dir alive while the path is used.
+fn local_file(name: &str, bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join(name);
+    std::fs::write(&p, bytes).unwrap();
+    (dir, p)
+}
+
+/// Serve `POST {api}/nests/n1/files/upload-url` handing out a URL on the same mock.
+async fn mount_upload_url(server: &MockServer, api: &str, request: serde_json::Value, max: u64) {
     Mock::given(method("POST"))
-        .and(path("/nests/n1/files"))
-        .and(body_json(json!({
-            "name": "data.csv",
-            "contentType": "text/csv",
-            "dataBase64": b64(b"a,b\n1,2\n"),
+        .and(path(format!("{api}/nests/n1/files/upload-url")))
+        .and(body_json(request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {
+                "url": format!("{}/api/file-uploads/n1/tok123", server.uri()),
+                "method": "POST",
+                "expiresAt": "2026-11-10T14:00:00.000Z",
+                "maxBytes": max,
+                "curl": "curl --data-binary @<path-to-file> '...'"
+            }
         })))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+fn uploads(reqs: &[wiremock::Request]) -> Vec<&wiremock::Request> {
+    reqs.iter()
+        .filter(|r| r.url.path().starts_with("/api/file-uploads/"))
+        .collect()
+}
+
+#[tokio::test]
+async fn upload_sends_the_raw_bytes_to_a_single_use_url_without_the_key() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "data.csv", "contentType": "text/csv"}),
+        10 * 1024 * 1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": {"id": "f9", "name": "data.csv", "contentType": "text/csv", "size": 8}
@@ -107,24 +143,45 @@ async fn upload_posts_name_type_and_base64_bytes() {
         .expect(1)
         .mount(&server)
         .await;
+    let (_dir, src) = local_file("data.csv", b"a,b\n1,2\n");
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let data = files::upload_file(&client, "n1", "data.csv", "text/csv", b"a,b\n1,2\n", false)
+    let data = files::upload_file(&client, "n1", "data.csv", "text/csv", &src, false)
         .await
         .unwrap();
     assert_eq!(data["id"], "f9");
+
+    let reqs = server.received_requests().await.unwrap();
+    let up = uploads(&reqs);
+    assert_eq!(up.len(), 1);
+    let up = up[0];
+    assert_eq!(
+        up.body, b"a,b\n1,2\n",
+        "the body is the file's bytes, not base64 or JSON"
+    );
+    assert!(
+        up.headers.get("authorization").is_none(),
+        "the upload URL is the credential; the API key must not go along"
+    );
+    assert_eq!(up.headers.get("content-type").unwrap(), "text/csv");
+    assert_eq!(up.headers.get("content-length").unwrap(), "8");
+    assert!(
+        up.headers.get("transfer-encoding").is_none(),
+        "sent with a length, not chunked"
+    );
 }
 
 #[tokio::test]
 async fn upload_inline_asks_for_an_inline_image_and_returns_its_reference() {
     let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "shot.png", "contentType": "image/png", "inline": true}),
+        10 * 1024 * 1024,
+    )
+    .await;
     Mock::given(method("POST"))
-        .and(path("/nests/n1/files"))
-        .and(body_json(json!({
-            "name": "shot.png",
-            "contentType": "image/png",
-            "dataBase64": b64(b"png"),
-            "inline": true,
-        })))
+        .and(path("/api/file-uploads/n1/tok123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": {
@@ -136,8 +193,9 @@ async fn upload_inline_asks_for_an_inline_image_and_returns_its_reference() {
         .expect(1)
         .mount(&server)
         .await;
+    let (_dir, src) = local_file("shot.png", b"png");
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let data = files::upload_file(&client, "n1", "shot.png", "image/png", b"png", true)
+    let data = files::upload_file(&client, "n1", "shot.png", "image/png", &src, true)
         .await
         .unwrap();
     assert_eq!(
@@ -150,18 +208,246 @@ async fn upload_inline_asks_for_an_inline_image_and_returns_its_reference() {
 async fn upload_inline_refusal_is_an_error() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/nests/n1/files"))
+        .and(path("/nests/n1/files/upload-url"))
         .respond_with(ResponseTemplate::new(422).set_body_json(json!({
             "status": "error",
             "message": "An inline upload must be a PNG, JPEG, GIF or WebP image, not \"text/plain\""
         })))
         .mount(&server)
         .await;
+    let (_dir, src) = local_file("a.txt", b"a");
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", b"a", true)
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, true)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("PNG, JPEG, GIF or WebP"), "{err}");
+}
+
+#[tokio::test]
+async fn upload_over_the_servers_limit_is_refused_before_sending() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "big.bin", "contentType": "application/octet-stream"}),
+        4,
+    )
+    .await;
+    let (_dir, src) = local_file("big.bin", b"12345");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(
+        &client,
+        "n1",
+        "big.bin",
+        "application/octet-stream",
+        &src,
+        false,
+    )
+    .await
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("too large"), "{msg}");
+    assert!(msg.contains("4 B"), "names the limit: {msg}");
+    let reqs = server.received_requests().await.unwrap();
+    assert!(uploads(&reqs).is_empty(), "no bytes go out");
+}
+
+#[tokio::test]
+async fn upload_of_an_empty_file_is_refused_before_asking_for_a_url() {
+    let server = MockServer::start().await;
+    let (_dir, src) = local_file("empty.txt", b"");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "empty.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("empty"), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn upload_413_says_the_limit_the_server_names() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.bin", "contentType": "application/octet-stream"}),
+        10 * 1024 * 1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(413).set_body_json(json!({
+            "status": "error",
+            "message": "File \"a.bin\" exceeds the maximum upload size of 2048 bytes"
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.bin", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(
+        &client,
+        "n1",
+        "a.bin",
+        "application/octet-stream",
+        &src,
+        false,
+    )
+    .await
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("too large"), "{msg}");
+    assert!(
+        msg.contains("2.0 KB"),
+        "the limit from the server's message: {msg}"
+    );
+    assert!(
+        !msg.contains("tok123"),
+        "the upload URL stays out of errors: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn upload_413_from_a_proxy_falls_back_to_the_issued_limit() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.bin", "contentType": "application/octet-stream"}),
+        3 * 1024 * 1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(
+            ResponseTemplate::new(413)
+                .set_body_string("<html><body>413 Request Entity Too Large</body></html>"),
+        )
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.bin", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(
+        &client,
+        "n1",
+        "a.bin",
+        "application/octet-stream",
+        &src,
+        false,
+    )
+    .await
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("too large"), "{msg}");
+    assert!(msg.contains("3.0 MB"), "{msg}");
+    assert!(!msg.contains("<html>"), "no raw proxy page: {msg}");
+}
+
+#[tokio::test]
+async fn upload_to_a_used_or_expired_url_says_to_run_it_again() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(410).set_body_json(json!({
+            "status": "error",
+            "message": "This upload URL has expired. Request a new one."
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("has expired"),
+        "keeps the server's reason: {msg}"
+    );
+    assert!(msg.contains("again"), "says what to do: {msg}");
+    assert!(!msg.contains("tok123"), "{msg}");
+}
+
+#[tokio::test]
+async fn upload_refused_at_upload_time_keeps_the_servers_reason() {
+    // The upload re-checks rights and the nest, so a 403 or 404 there is not
+    // necessarily about the URL.
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "status": "error",
+            "message": "Not allowed to change files on this nest"
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("Not allowed to change files"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn upload_refuses_a_cleartext_upload_url() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/n1/files/upload-url"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {"url": "http://uploads.example.com/api/file-uploads/n1/tok123",
+                     "method": "POST", "maxBytes": 1024}
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("unencrypted") || msg.contains("https"),
+        "{msg}"
+    );
+    assert!(!msg.contains("tok123"), "{msg}");
+}
+
+#[tokio::test]
+async fn upload_on_a_server_without_upload_urls_says_so() {
+    // An older server routes the path to the file route, which has no POST.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/n1/files/upload-url"))
+        .respond_with(ResponseTemplate::new(405).set_body_json(json!({
+            "status": "error",
+            "message": "API endpoint does not exist"
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("upload URL"), "{err}");
 }
 
 #[tokio::test]
@@ -327,13 +613,16 @@ async fn read_save_writes_the_decoded_bytes_and_refuses_to_overwrite() {
 #[tokio::test]
 async fn upload_reads_the_file_and_names_it_after_the_path() {
     let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "/api",
+        json!({"name": "plan.md", "contentType": "text/markdown"}),
+        10 * 1024 * 1024,
+    )
+    .await;
     Mock::given(method("POST"))
-        .and(path("/api/nests/n1/files"))
-        .and(body_json(json!({
-            "name": "plan.md",
-            "contentType": "text/markdown",
-            "dataBase64": b64(b"# Plan\n"),
-        })))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .and(wiremock::matchers::body_bytes(b"# Plan\n".to_vec()))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": {"id": "f9", "name": "plan.md", "contentType": "text/markdown", "size": 7}
@@ -354,7 +643,11 @@ async fn upload_reads_the_file_and_names_it_after_the_path() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("f9"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Uploaded plan.md (7 B) to n1  [f9]"),
+        "{stdout}"
+    );
 }
 
 #[tokio::test]
