@@ -162,7 +162,7 @@ impl AddOutcome {
             let refused = if self.failed == 0 {
                 String::new()
             } else {
-                format!(", plus the {} refused points listed above", self.failed)
+                ", plus the refused points listed above".to_string()
             };
             return Some(format!(
                 "{err}\nPoints 1-{sent} were already sent ({} added, {} refused). \

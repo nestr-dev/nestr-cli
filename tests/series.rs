@@ -227,7 +227,7 @@ async fn a_backfill_that_fails_partway_says_where_to_resend_from() {
     };
     let why = with_refusals.failure(501).unwrap();
     assert!(
-        why.contains("from point #501 on, plus the 1 refused points listed above"),
+        why.contains("from point #501 on, plus the refused points listed above"),
         "{why}"
     );
 }
