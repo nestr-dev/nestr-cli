@@ -308,10 +308,22 @@ impl NestrClient {
         let code = status.as_u16();
         let body = resp.text().await.unwrap_or_default();
         let detail = extract_error_detail(&body);
+        let has_detail = detail.is_some();
         let msg = detail.unwrap_or_else(|| body.clone());
         if status == StatusCode::FORBIDDEN {
             if let Some(e) = read_only_key_error(&body).or_else(|| user_scope_error(&msg)) {
                 return Err(e);
+            }
+            // A refusal thrown inside the server (a write guard's) answers 403 with the
+            // framework's plain-text body, "Server error." in production. Passing that on
+            // makes a refusal read as a fault.
+            if !has_detail {
+                return Err(NestrError::Permission(
+                    "Nestr refused this request without saying why. Usually this login \
+                     doesn't have the rights for this change; check that you can make it \
+                     in the app."
+                        .into(),
+                ));
             }
         }
         match status {
