@@ -25,6 +25,7 @@ pub mod queues;
 pub mod recurrence;
 pub mod roles;
 pub mod search;
+pub mod series;
 pub mod tensions;
 pub mod users;
 pub mod webhooks;

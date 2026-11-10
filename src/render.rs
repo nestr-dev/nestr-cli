@@ -949,6 +949,97 @@ pub fn output_history(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// Under `-o json`, a response's `meta` (the periods an insight covers, whether a
+/// point list has more) goes to stderr as one `{"meta": …}` line, so stdout stays
+/// the bare data and scripts that pipe it keep working. Nothing in text mode.
+pub fn emit_meta(meta: Option<&Value>, output: OutputFormat) {
+    if output != OutputFormat::Json {
+        return;
+    }
+    if let Some(m) = meta.filter(|m| m.as_object().is_some_and(|o| !o.is_empty())) {
+        eprintln!("{}", serde_json::json!({ "meta": m }));
+    }
+}
+
+fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
+    v.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+/// `nests series list` as a table: one row per series.
+pub fn series_text(data: &Value) -> String {
+    let list = data.as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        return "This nest has no dataseries.".yellow().to_string();
+    }
+    let rows = list
+        .iter()
+        .map(|s| {
+            let current = s
+                .get("current")
+                .filter(|c| c.is_object())
+                .map(|c| {
+                    format!(
+                        "{} at {}",
+                        fmt_num(c.get("value").and_then(Value::as_f64)),
+                        str_of(c, "date")
+                    )
+                })
+                .unwrap_or_else(|| "-".into());
+            let state = if s.get("hidden").and_then(Value::as_bool) == Some(true) {
+                "hidden: read-only"
+            } else {
+                "in use"
+            };
+            vec![
+                str_of(s, "key").to_string(),
+                str_of(s, "seriesId").to_string(),
+                str_of(s, "dataType").to_string(),
+                str_of(s, "trackedField").to_string(),
+                current,
+                state.to_string(),
+            ]
+        })
+        .collect();
+    format_table(
+        &["KEY", "SERIES", "KIND", "TRACKS", "CURRENT", "STATE"],
+        rows,
+    )
+}
+
+/// `nests series points` as an ID·DATE·VALUE table, with a footer when the
+/// server held points back (`meta.has_more`): there is no cursor, so narrow.
+pub fn points_text(data: &Value, meta: Option<&Value>) -> String {
+    let points = data.as_array().cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    if points.is_empty() {
+        out.push("No points.".yellow().to_string());
+    } else {
+        let rows = points
+            .iter()
+            .map(|p| {
+                vec![
+                    str_of(p, "id").to_string(),
+                    str_of(p, "date").to_string(),
+                    fmt_num(p.get("value").and_then(Value::as_f64)),
+                ]
+            })
+            .collect();
+        out.push(format_table(&["ID", "DATE", "VALUE"], rows));
+    }
+    let has_more = meta
+        .and_then(|m| m.get("has_more"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if has_more {
+        out.push(
+            "more points: narrow --from/--to to read the rest, or raise --limit (max 5000)"
+                .dimmed()
+                .to_string(),
+        );
+    }
+    out.join("\n")
+}
+
 pub fn webhook_table(hooks: &[WebhookView]) -> String {
     let rows: Vec<Vec<String>> = hooks
         .iter()
