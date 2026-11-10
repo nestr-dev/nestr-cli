@@ -84,6 +84,13 @@ nestr nests create --title "Pre-launch checklist" --parent <projectId> --label c
 - `--purpose` is an optional one-line *why* (a project inherits its parent's if unset);
   `--description` is the body. Never put body text in `--purpose`.
 - `--parent <id>` makes the new nest a child/subtask — this is how you build the tree.
+- `--completed` creates it already done, for work that is finished before it is
+  recorded. It is for a task, tension or meeting; a project is done through its status
+  field (`--field project.status=Done`), not `--completed`.
+
+```bash
+nestr nests create --title "Renewed the domain" --parent <projectId> --completed   # log done work
+```
 
 ```bash
 nestr nests update <id> --completed true                # tick it off

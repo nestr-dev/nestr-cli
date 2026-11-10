@@ -127,6 +127,11 @@ pub enum NestsCmd {
         /// moved there instead, with a warning.
         #[arg(long, value_name = "ROLE_OR_CIRCLE_ID")]
         proxy_assign: Option<String>,
+        /// Create it already done, e.g. to record work that is finished. Bare
+        /// `--completed` means true. For a task, tension or meeting; a project's
+        /// state lives in its status field instead (--field project.status=Done).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        completed: Option<bool>,
     },
     /// Update fields on a nest.
     Update {
@@ -711,6 +716,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             assignees,
             fields,
             proxy_assign,
+            completed,
         } => {
             safety::enforce_read_only(g.read_only, "nests create")?;
             validation::validate_prime_labels(&labels)?;
@@ -728,6 +734,9 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             );
             apply_schedule(&mut body, start, all_day, false, false);
             apply_proxy_assign(&mut body, proxy_assign, false);
+            if let Some(c) = completed {
+                body["completed"] = c.into();
+            }
             let data = create_nest(&client, &body).await?;
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
