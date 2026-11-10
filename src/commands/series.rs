@@ -300,7 +300,10 @@ pub fn add_text(outcome: &AddOutcome, points: &[Value], key: &str) -> String {
                     Value::String(s) => s.clone(),
                     other => other.to_string(),
                 });
-                let value = p.get("value").map(Value::to_string);
+                let value = p.get("value").map(|v| match v.as_f64() {
+                    Some(n) => render::fmt_num(Some(n)),
+                    None => v.to_string(),
+                });
                 format!("{}={}", date.unwrap_or_default(), value.unwrap_or_default())
             })
             .unwrap_or_default();
@@ -386,10 +389,17 @@ pub async fn run(cmd: SeriesCmd, g: &GlobalArgs) -> Result<()> {
                 OutputFormat::Text => println!("{}", add_text(&outcome, &all, &key)),
             }
             if outcome.failed > 0 {
+                if outcome.created == 0 {
+                    bail!(
+                        "all {} points were refused; nothing was added",
+                        outcome.failed
+                    );
+                }
                 bail!(
-                    "{} of {} points were refused; the rest were added",
+                    "{} of {} points were refused; the other {} were added",
                     outcome.failed,
-                    all.len()
+                    all.len(),
+                    outcome.created
                 );
             }
         }

@@ -202,7 +202,7 @@ fn add_text_lists_each_refused_point() {
     ];
     let out = series::add_text(&outcome, &points, "metric-data");
     assert!(out.contains("Added 1 point"), "{out}");
-    assert!(out.contains("bad"), "{out}");
+    assert!(out.contains("bad=3:"), "{out}");
     assert!(out.contains("date must be an ISO date"), "{out}");
 }
 
