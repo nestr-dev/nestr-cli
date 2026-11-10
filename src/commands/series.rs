@@ -149,10 +149,42 @@ pub struct AddOutcome {
     pub created: usize,
     pub failed: usize,
     pub results: Vec<Value>,
+    /// Set when a later request of a split backfill failed: the error, and how
+    /// many points went out before it. Those are written, so a rerun of the whole
+    /// backfill would add them twice.
+    pub stopped: Option<(usize, String)>,
+}
+
+impl AddOutcome {
+    /// Why the command exits non-zero, if it should.
+    pub fn failure(&self, total: usize) -> Option<String> {
+        if let Some((sent, err)) = &self.stopped {
+            return Some(format!(
+                "{err}\nPoints 1-{sent} were already sent ({} added, {} refused). \
+                 Resend only from point #{} on, or the added points are stored twice.",
+                self.created,
+                self.failed,
+                sent + 1
+            ));
+        }
+        if self.failed == 0 {
+            return None;
+        }
+        Some(if self.created == 0 {
+            format!("all {} points were refused; nothing was added", self.failed)
+        } else {
+            format!(
+                "{} of {total} points were refused; the other {} were added",
+                self.failed, self.created
+            )
+        })
+    }
 }
 
 /// `POST …/points`, always as an array so every point gets its own result. Sends
 /// at most [`MAX_POINTS_PER_WRITE`] per request; `index` runs across all of them.
+/// A failed first request is an error (nothing was written); a failed later one
+/// stops the backfill and is recorded in [`AddOutcome::stopped`].
 pub async fn add_points(
     client: &NestrClient,
     nest: &str,
@@ -164,7 +196,14 @@ pub async fn add_points(
     let mut outcome = AddOutcome::default();
     for (n, chunk) in points.chunks(MAX_POINTS_PER_WRITE).enumerate() {
         let offset = n * MAX_POINTS_PER_WRITE;
-        let raw: Value = client.post(&path, &Value::Array(chunk.to_vec())).await?;
+        let raw: Value = match client.post(&path, &Value::Array(chunk.to_vec())).await {
+            Ok(raw) => raw,
+            Err(e) if offset > 0 => {
+                outcome.stopped = Some((offset, e.to_string()));
+                return Ok(outcome);
+            }
+            Err(e) => return Err(e),
+        };
         let (data, _, _) = unwrap_data(raw);
         for (i, mut r) in data
             .as_array()
@@ -388,19 +427,8 @@ pub async fn run(cmd: SeriesCmd, g: &GlobalArgs) -> Result<()> {
                 OutputFormat::Json => render::print_json(&Value::Array(outcome.results.clone()))?,
                 OutputFormat::Text => println!("{}", add_text(&outcome, &all, &key)),
             }
-            if outcome.failed > 0 {
-                if outcome.created == 0 {
-                    bail!(
-                        "all {} points were refused; nothing was added",
-                        outcome.failed
-                    );
-                }
-                bail!(
-                    "{} of {} points were refused; the other {} were added",
-                    outcome.failed,
-                    all.len(),
-                    outcome.created
-                );
+            if let Some(why) = outcome.failure(all.len()) {
+                bail!(why);
             }
         }
         SeriesCmd::Edit {

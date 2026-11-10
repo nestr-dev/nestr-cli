@@ -186,11 +186,64 @@ async fn add_splits_a_backfill_into_requests_of_500() {
     assert_eq!(outcome.results[500]["index"], 500);
 }
 
+#[tokio::test]
+async fn a_backfill_that_fails_partway_says_where_to_resend_from() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nests/n1/series/metric-data/points"))
+        .respond_with(|req: &wiremock::Request| {
+            let items: Vec<serde_json::Value> = serde_json::from_slice(&req.body).unwrap();
+            if items.len() < 500 {
+                return ResponseTemplate::new(500)
+                    .set_body_json(json!({"status": "error", "message": "boom"}));
+            }
+            let data: Vec<_> = (0..items.len())
+                .map(|i| json!({"index": i, "status": "created", "data": {"id": format!("p{i}")}}))
+                .collect();
+            ResponseTemplate::new(200).set_body_json(json!({
+                "status": "success", "meta": {"created": items.len(), "failed": 0}, "data": data
+            }))
+        })
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let points: Vec<_> = (0..501)
+        .map(|i| json!({"date": i.to_string(), "value": 1.0}))
+        .collect();
+    let outcome = series::add_points(&client, "n1", "metric-data", None, &points)
+        .await
+        .unwrap();
+    assert_eq!(outcome.created, 500);
+    let why = outcome.failure(points.len()).unwrap();
+    assert!(why.contains("boom"), "{why}");
+    assert!(why.contains("from point #501"), "{why}");
+}
+
+#[test]
+fn a_fully_refused_backfill_says_nothing_was_added() {
+    let outcome = series::AddOutcome {
+        created: 0,
+        failed: 2,
+        results: vec![],
+        stopped: None,
+    };
+    assert_eq!(
+        outcome.failure(2).unwrap(),
+        "all 2 points were refused; nothing was added"
+    );
+    let ok = series::AddOutcome {
+        created: 2,
+        ..Default::default()
+    };
+    assert!(ok.failure(2).is_none());
+}
+
 #[test]
 fn add_text_lists_each_refused_point() {
     let outcome = series::AddOutcome {
         created: 1,
         failed: 1,
+        stopped: None,
         results: vec![
             json!({"index": 0, "status": "created", "data": {"id": "p1"}}),
             json!({"index": 1, "status": "error", "message": "date must be an ISO date"}),
