@@ -110,6 +110,13 @@ template, `--type` and `--name` are required. `mcp` and `api` need a `url` in
 `--config`, `--capabilities` and `--exposure` take JSON objects. They hold no
 secrets: the server refuses a header that looks like a credential.
 
+**Shared accounts are off until a connector allows them.** The `SHARED` column in
+`connectors list` says whether one shared login may stand in for everyone who
+reaches the connector. While it is off, everyone connects their own account, and an
+assistant uses the account of the person it helps. Only a workspace admin can turn it
+on, in the app under workspace settings > Integrations. `--exposure` can turn
+`allowShared` off but not on; the API refuses that with a 403.
+
 ## Give access (admin)
 
 ```bash
@@ -137,6 +144,32 @@ This prints a link. **Give it to a person to open.** They sign in or enter the k
 there, so the secret never passes through the CLI or an agent. Don't fetch the link
 yourself, and don't ask anyone for a secret. Run `connections list` afterwards to
 check that it worked.
+
+When the connector allows a shared account, `bind` and `link` also say who a shared
+login would reach (everyone in the workspace or the role, people and agents counted
+apart). Pass that on before the person opens the link: they should connect a
+personal account just for themselves, and share only a service account. `link` prints
+it on stderr, so stdout stays the bare URL.
+
+## Held-back connectors
+
+A role's connector can be **held back on scheduled runs** (runs nobody started, such
+as an autonomous agent's cadence) until someone approves the role's latest
+instructions. That happens when the instructions were edited by someone outside the
+connector's audience. It is not broken: the credential is fine and manual runs still
+get it.
+
+```bash
+nestr connectors connections list                   # HELD counts the waiting runs, with the approve links
+nestr agents connectors <agentId>                   # SCHEDULED says "held" on those connectors
+```
+
+Under the table, `connections list` names each waiting item and its approve link,
+and marks the ones you can approve yourself. Only a person releases it: someone the
+connector is shared with, or a workspace admin, presses Approve on that page. A
+reconnect by someone it is shared with also counts as approving. Changing the
+connector's settings or its exposure doesn't help. An agent can't approve on anyone's
+behalf: tell the person you're helping and give them the link.
 
 ## Remove access
 

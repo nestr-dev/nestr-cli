@@ -98,6 +98,8 @@ pub struct ConnectorSpec {
     #[arg(long, value_name = "JSON")]
     pub capabilities: Option<String>,
     /// Which owners may bind, as JSON, e.g. '{"domainGated":true,"userAgent":false}'.
+    /// `allowShared` can be turned off here but not on: a workspace admin allows shared
+    /// accounts in the app, under workspace settings > Integrations.
     #[arg(long, value_name = "JSON")]
     pub exposure: Option<String>,
     /// How a person connects: a one-time secret, or OAuth 2.
@@ -377,7 +379,7 @@ pub async fn run(cmd: ConnectorsCmd, g: &GlobalArgs) -> Result<()> {
             match cmd {
                 ConnectionsCmd::List { include_disabled } => {
                     let data = fetch_connections(&client, &ws, include_disabled).await?;
-                    render::output_connections(&data, cfg.output)?;
+                    render::output_connections(&data, &cfg.host, cfg.output)?;
                 }
                 // A POST, but it changes nothing: the server only builds a URL, and
                 // whoever opens it is re-checked. So it is a read, and --read-only

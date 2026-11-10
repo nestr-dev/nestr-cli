@@ -410,9 +410,21 @@ pub struct ConnectorView {
     pub config: Option<Value>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub exposure: Option<Value>,
 }
 
 impl ConnectorView {
+    /// Whether one shared account may stand in for everyone who reaches it. Off
+    /// unless the catalog says so: the server treats a missing flag as off.
+    pub fn allows_shared(&self) -> bool {
+        self.exposure
+            .as_ref()
+            .and_then(|e| e.get("allowShared"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// The endpoint url (mcp/api) or command (cli).
     pub fn target(&self) -> String {
         let cfg = self.config.as_ref();
@@ -454,9 +466,46 @@ pub struct ConnectionView {
     pub status: Option<String>,
     #[serde(default, rename = "connectedCount")]
     pub connected_count: Option<u64>,
+    /// Each credential on the binding, with whose it is. Never a secret.
+    #[serde(default)]
+    pub authorizations: Vec<Value>,
+    /// Scheduled runs this role connector is held back from until someone it is
+    /// shared with approves the role's latest instructions.
+    #[serde(default, rename = "pendingInstructionApprovals")]
+    pub pending_approvals: Vec<PendingApprovalView>,
+    /// Items past the server's read that also wait on this connector.
+    #[serde(default, rename = "pendingInstructionApprovalsMore")]
+    pub pending_approvals_more: Option<u64>,
+}
+
+/// One scheduled run a role connector is held back from, pending instruction approval.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PendingApprovalView {
+    #[serde(default, rename = "nestTitle")]
+    pub nest_title: Option<String>,
+    #[serde(default, rename = "askedAt")]
+    pub asked_at: Option<String>,
+    /// App path of the ask comment (or the item): a page for a person.
+    #[serde(default, rename = "commentPath")]
+    pub comment_path: Option<String>,
+    /// Whether the CALLER may approve it.
+    #[serde(default, rename = "canApprove")]
+    pub can_approve: Option<bool>,
 }
 
 impl ConnectionView {
+    pub fn is_held(&self) -> bool {
+        !self.pending_approvals.is_empty() || self.pending_approvals_more.unwrap_or(0) > 0
+    }
+
+    /// A shared account sits on the binding but its connector no longer allows
+    /// one, so it is not used (and does not count as connected).
+    pub fn has_disallowed_shared_account(&self) -> bool {
+        self.authorizations
+            .iter()
+            .any(|a| a.get("sharedNotAllowed").and_then(Value::as_bool) == Some(true))
+    }
+
     pub fn owner_type(&self) -> String {
         self.owner
             .as_ref()

@@ -358,3 +358,185 @@ async fn read_only_blocks_connection_remove_before_writing() {
 
     std::env::remove_var("NESTR_HOME");
 }
+
+// --- what a person sees: shared accounts and held-back connectors -------------
+
+use nestr_cli::render;
+
+#[test]
+fn catalog_says_whether_a_connector_allows_a_shared_account() {
+    let out = render::connectors_text(&json!([
+        {"_id":"c1","name":"Gmail","type":"mcp","authStrategy":"oauth2","enabled":true,
+         "exposure":{"userAgent":false,"domainGated":true,"allowShared":false}},
+        {"_id":"c2","name":"Ledger","type":"api","authStrategy":"secret","enabled":true,
+         "exposure":{"userAgent":false,"domainGated":true,"allowShared":true}}
+    ]));
+    assert!(out.contains("SHARED"), "{out}");
+    let gmail = out.lines().find(|l| l.contains("Gmail")).unwrap();
+    let ledger = out.lines().find(|l| l.contains("Ledger")).unwrap();
+    assert!(gmail.contains("no"), "{gmail}");
+    assert!(ledger.contains("yes"), "{ledger}");
+}
+
+#[test]
+fn shared_reach_names_who_a_shared_account_would_reach() {
+    let s = render::shared_reach_sentence(&json!({
+        "boundary":"workspace","people":12,"agents":1,"growsWithMembership":true
+    }))
+    .unwrap();
+    assert!(s.contains("everyone in the workspace"), "{s}");
+    assert!(s.contains("12 people and 1 agent"), "{s}");
+    assert!(s.contains("anyone who joins later"), "{s}");
+    assert!(s.contains("personal account"), "{s}");
+
+    let role = render::shared_reach_sentence(&json!({
+        "boundary":"role","people":1,"agents":0,"growsWithMembership":false
+    }))
+    .unwrap();
+    assert!(role.contains("everyone in the role"), "{role}");
+    assert!(role.contains("1 person and 0 agents"), "{role}");
+    assert!(!role.contains("joins later"), "{role}");
+}
+
+#[test]
+fn shared_reach_says_nothing_when_sharing_does_not_apply() {
+    assert!(render::shared_reach_sentence(&serde_json::Value::Null).is_none());
+}
+
+fn held_connection() -> serde_json::Value {
+    json!({
+        "connectionId":"conn1","connectorName":"Gmail",
+        "owner":{"type":"role-domain","id":"d1"},"status":"active","connectedCount":1,
+        "authorizations":[{"scope":"personal","connected":true}],
+        "pendingInstructionApprovals":[{
+            "nestId":"r1","nestTitle":"Finance","connectorName":"Gmail",
+            "askedAt":"2026-11-08T09:00:00.000Z","commentPath":"/n/r1?unblock=1","canApprove":true
+        }],
+        "pendingInstructionApprovalsMore":2
+    })
+}
+
+#[test]
+fn connections_list_marks_a_held_connector_and_says_why() {
+    let out = render::connections_text(&json!([held_connection()]), "https://app.example.test/");
+    assert!(out.contains("HELD"), "{out}");
+    // Not broken: the credential is fine, and the text says who releases it.
+    assert!(out.contains("held back on scheduled runs"), "{out}");
+    assert!(out.contains("credential is fine"), "{out}");
+    assert!(out.contains("Manual runs still use it"), "{out}");
+    assert!(
+        out.contains("https://app.example.test/n/r1?unblock=1"),
+        "{out}"
+    );
+    assert!(out.contains("Finance"), "{out}");
+    assert!(out.contains("you can approve"), "{out}");
+    assert!(out.contains("2 more"), "{out}");
+}
+
+#[test]
+fn connections_list_without_held_connectors_adds_no_notes() {
+    let out = render::connections_text(
+        &json!([{
+            "connectionId":"conn2","connectorName":"Drive","owner":{"type":"workspace","id":"ws"},
+            "status":"active","connectedCount":1,"pendingInstructionApprovals":[]
+        }]),
+        "https://app.example.test",
+    );
+    assert!(!out.contains("held back"), "{out}");
+}
+
+#[test]
+fn connections_list_explains_a_shared_account_the_connector_no_longer_allows() {
+    let out = render::connections_text(
+        &json!([{
+            "connectionId":"conn3","connectorName":"CRM","owner":{"type":"workspace","id":"ws"},
+            "status":"active","connectedCount":0,
+            "authorizations":[{"scope":"shared","connected":false,"sharedNotAllowed":true}]
+        }]),
+        "https://app.example.test",
+    );
+    assert!(out.contains("no longer allows shared accounts"), "{out}");
+}
+
+#[test]
+fn agent_reach_marks_a_connector_held_for_instruction_approval() {
+    let reach = json!([
+        {"connectionId":"conn1","connectorName":"Gmail","source":"role-domain","available":true,
+         "reason":null,"roleTitle":"Finance","domainTitle":"Mailbox","scope":"personal"},
+        {"connectionId":"conn2","connectorName":"Drive","source":"workspace","available":true,
+         "reason":null,"scope":"shared"}
+    ]);
+    let out = render::agent_reach_text(&reach, Some(&json!([held_connection()])));
+    let gmail = out.lines().find(|l| l.contains("Gmail")).unwrap();
+    let drive = out.lines().find(|l| l.contains("Drive")).unwrap();
+    assert!(gmail.contains("held"), "{gmail}");
+    assert!(!drive.contains("held"), "{drive}");
+    assert!(drive.contains("shared"), "{drive}");
+    assert!(out.contains("nestr connectors connections list"), "{out}");
+}
+
+#[test]
+fn agent_reach_without_the_connections_listing_still_renders() {
+    let reach = json!([{"connectionId":"conn1","connectorName":"Gmail","available":true}]);
+    let out = render::agent_reach_text(&reach, None);
+    assert!(out.contains("Gmail"), "{out}");
+}
+
+/// Run the real binary against the mock server with an api-key profile written into
+/// its own temp dir, so it doesn't race the test here that sets NESTR_HOME.
+fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
+    use nestr_cli::config::{config_dir_in, AuthKind, CredentialStorage, Profile};
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = Profile {
+        auth: AuthKind::ApiKey,
+        credential_storage: CredentialStorage::File,
+        host: host.into(),
+        workspace_id: "ws".into(),
+        api_key: Some("k".into()),
+        oauth_client_id: None,
+        oauth_token_url: None,
+        oauth_authorize_url: None,
+        oauth_tokens: None,
+        client_instance_id: None,
+        default_output_format: None,
+    };
+    let profiles = config_dir_in(Some(tmp.path().into())).join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("t.toml"),
+        toml::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+    std::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
+        .args(["--profile", "t", "--yes"])
+        .args(args)
+        .env("NESTR_HOME", tmp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_PROFILE")
+        .env_remove("NESTR_HOST")
+        .env_remove("NESTR_READ_ONLY")
+        .env_remove("NESTR_AGENT_MODE")
+        .output()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connect_link_keeps_stdout_the_url_and_warns_about_a_shared_account_on_stderr() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/workspaces/ws/connections/c1/connect-link"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status":"success",
+            "data":{"connectionId":"c1","url":"https://app.example.test/n/ws?connect=c1",
+                    "reach":{"boundary":"role","people":3,"agents":1,"growsWithMembership":true}}
+        })))
+        .mount(&server)
+        .await;
+    let out = run_cli(&server.uri(), &["connectors", "connections", "link", "c1"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert_eq!(stdout.trim(), "https://app.example.test/n/ws?connect=c1");
+    assert!(stderr.contains("3 people and 1 agent"), "stderr: {stderr}");
+}

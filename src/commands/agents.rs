@@ -372,7 +372,18 @@ pub async fn run(cmd: AgentsCmd, g: &GlobalArgs) -> Result<()> {
         AgentsCmd::Connectors { agent_id } => {
             let ws = cfg.require_workspace()?;
             let data = fetch_reach(&client, ws, &agent_id).await?;
-            render::output_agent_reach(&data, cfg.output)?;
+            // The reach rows don't say a role connector is held back for instruction
+            // approval; the connections listing does. Text only (-o json stays the reach
+            // as the API sends it), and a listing that can't be read leaves the table as is.
+            let connections = match cfg.output {
+                crate::config::OutputFormat::Text => {
+                    crate::commands::connectors::fetch_connections(&client, ws, false)
+                        .await
+                        .ok()
+                }
+                crate::config::OutputFormat::Json => None,
+            };
+            render::output_agent_reach(&data, connections.as_ref(), cfg.output)?;
         }
         // The mode routes are nest-scoped, so they need no workspace.
         AgentsCmd::Mode { cmd } => match cmd {

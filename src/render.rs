@@ -1113,83 +1113,143 @@ pub fn agent_run(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-pub fn output_agent_reach(data: &Value, output: OutputFormat) -> Result<()> {
+pub fn output_agent_reach(
+    data: &Value,
+    connections: Option<&Value>,
+    output: OutputFormat,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let reach: Vec<AgentReachView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if reach.is_empty() {
-                print_no_results("This agent can reach no connectors.");
-                return Ok(());
-            }
-            let rows = reach
-                .iter()
-                .map(|r| {
-                    let via = match (&r.role_title, &r.domain_title) {
-                        (Some(role), Some(domain)) => format!("{role} / {domain}"),
-                        (Some(role), None) => role.clone(),
-                        _ => String::new(),
-                    };
-                    vec![
-                        r.connector_name.clone(),
-                        yes_no(r.available),
-                        r.source.clone().unwrap_or_default(),
-                        via,
-                        r.reason.clone().unwrap_or_default(),
-                        r.connection_id.clone(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(
-                    &[
-                        "CONNECTOR",
-                        "AVAILABLE",
-                        "SOURCE",
-                        "VIA",
-                        "REASON",
-                        "CONNECTION"
-                    ],
-                    rows
-                )
-            );
-        }
+        OutputFormat::Text => println!("{}", agent_reach_text(data, connections)),
     }
     Ok(())
+}
+
+/// An agent's reach as a table. `connections` is the workspace connections listing,
+/// when it could be read: the reach rows don't say a role connector is held back for
+/// instruction approval, the listing does, so the two are joined on the connection id.
+pub fn agent_reach_text(data: &Value, connections: Option<&Value>) -> String {
+    let reach: Vec<AgentReachView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if reach.is_empty() {
+        return "This agent can reach no connectors.".yellow().to_string();
+    }
+    let listing: Vec<ConnectionView> = connections
+        .and_then(|c| serde_json::from_value(c.clone()).ok())
+        .unwrap_or_default();
+    let held: std::collections::HashSet<&str> = listing
+        .iter()
+        .filter(|c| c.is_held())
+        .map(|c| c.id.as_str())
+        .collect();
+    let mut any_held = false;
+    let rows = reach
+        .iter()
+        .map(|r| {
+            let via = match (&r.role_title, &r.domain_title) {
+                (Some(role), Some(domain)) => format!("{role} / {domain}"),
+                (Some(role), None) => role.clone(),
+                _ => String::new(),
+            };
+            let is_held = held.contains(r.connection_id.as_str());
+            any_held |= is_held;
+            vec![
+                r.connector_name.clone(),
+                yes_no(r.available),
+                r.source.clone().unwrap_or_default(),
+                via,
+                r.scope.clone().unwrap_or_default(),
+                if is_held {
+                    "held".into()
+                } else {
+                    String::new()
+                },
+                r.reason.clone().unwrap_or_default(),
+                r.connection_id.clone(),
+            ]
+        })
+        .collect();
+    let mut out = format_table(
+        &[
+            "CONNECTOR",
+            "AVAILABLE",
+            "SOURCE",
+            "VIA",
+            "ACCOUNT",
+            "SCHEDULED",
+            "REASON",
+            "CONNECTION",
+        ],
+        rows,
+    );
+    if any_held {
+        out.push_str(
+            "\n\nheld: scheduled runs don't get this connector until someone it is shared with \
+             approves the role's latest instructions. Manual runs still use it. \
+             `nestr connectors connections list` shows where to approve.",
+        );
+    }
+    out
 }
 
 pub fn output_connectors(data: &Value, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let connectors: Vec<ConnectorView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if connectors.is_empty() {
-                print_no_results("No connectors.");
-                return Ok(());
-            }
-            let rows = connectors
-                .iter()
-                .map(|c| {
-                    vec![
-                        c.id.clone(),
-                        c.name.clone(),
-                        c.type_.clone().unwrap_or_default(),
-                        c.auth_strategy.clone().unwrap_or_default(),
-                        yes_no(c.enabled),
-                        c.target(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(&["ID", "NAME", "TYPE", "AUTH", "ENABLED", "TARGET"], rows)
-            );
-        }
+        OutputFormat::Text => println!("{}", connectors_text(data)),
     }
     Ok(())
+}
+
+/// The catalog as a table. SHARED is whether one shared account may stand in for
+/// everyone who reaches the connector; it is off until an admin allows it in the app.
+pub fn connectors_text(data: &Value) -> String {
+    let connectors: Vec<ConnectorView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if connectors.is_empty() {
+        return "No connectors.".yellow().to_string();
+    }
+    let rows = connectors
+        .iter()
+        .map(|c| {
+            vec![
+                c.id.clone(),
+                c.name.clone(),
+                c.type_.clone().unwrap_or_default(),
+                c.auth_strategy.clone().unwrap_or_default(),
+                yes_no(c.enabled),
+                yes_no(Some(c.allows_shared())),
+                c.target(),
+            ]
+        })
+        .collect();
+    format_table(
+        &["ID", "NAME", "TYPE", "AUTH", "ENABLED", "SHARED", "TARGET"],
+        rows,
+    )
+}
+
+/// Who a shared account on a connection would reach, from the `reach` the bind and
+/// connect-link responses carry. `None` when sharing does not apply (the server
+/// sends null: the connector allows no shared account, or one person or agent owns it).
+pub fn shared_reach_sentence(reach: &Value) -> Option<String> {
+    let boundary = reach.get("boundary").and_then(Value::as_str)?;
+    let count = |key: &str| reach.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let (people, agents) = (count("people"), count("agents"));
+    let where_ = if boundary == "workspace" {
+        "the workspace"
+    } else {
+        "the role"
+    };
+    let people = format!("{people} {}", if people == 1 { "person" } else { "people" });
+    let agents = format!("{agents} {}", if agents == 1 { "agent" } else { "agents" });
+    let later = if reach.get("growsWithMembership").and_then(Value::as_bool) == Some(true) {
+        ", plus anyone who joins later"
+    } else {
+        ""
+    };
+    Some(format!(
+        "A shared account here would be used by everyone in {where_}: {people} and {agents} \
+         today{later}. Whoever opens the link should connect a personal account just for \
+         themselves; share only a service account."
+    ))
 }
 
 pub fn connector_detail(data: &Value, output: OutputFormat) -> Result<()> {
@@ -1208,6 +1268,14 @@ pub fn connector_detail(data: &Value, output: OutputFormat) -> Result<()> {
                 println!("target: {}", clean_text(&target));
             }
             println!("enabled: {}", yes_no(c.enabled));
+            if c.allows_shared() {
+                println!("shared accounts: allowed");
+            } else {
+                println!(
+                    "shared accounts: off (everyone connects their own; a workspace admin can \
+                     allow one in the app, under workspace settings > Integrations)"
+                );
+            }
         }
     }
     Ok(())
@@ -1244,46 +1312,98 @@ pub fn output_connector_templates(data: &Value, output: OutputFormat) -> Result<
     Ok(())
 }
 
-pub fn output_connections(data: &Value, output: OutputFormat) -> Result<()> {
+pub fn output_connections(data: &Value, host: &str, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let conns: Vec<ConnectionView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if conns.is_empty() {
-                print_no_results("No connections.");
-                return Ok(());
-            }
-            let rows = conns
-                .iter()
-                .map(|c| {
-                    vec![
-                        c.id.clone(),
-                        c.connector_name.clone(),
-                        c.owner_type(),
-                        c.owner_label.clone().unwrap_or_default(),
-                        c.status.clone().unwrap_or_default(),
-                        c.connected_count.unwrap_or(0).to_string(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(
-                    &[
-                        "ID",
-                        "CONNECTOR",
-                        "OWNER TYPE",
-                        "OWNER",
-                        "STATUS",
-                        "CONNECTED"
-                    ],
-                    rows
-                )
-            );
-        }
+        OutputFormat::Text => println!("{}", connections_text(data, host)),
     }
     Ok(())
+}
+
+/// The connections listing as a table, then a note under it for each connection that
+/// would otherwise look broken: a role connector held back on scheduled runs pending
+/// instruction approval, or a shared account its connector no longer allows.
+pub fn connections_text(data: &Value, host: &str) -> String {
+    let conns: Vec<ConnectionView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if conns.is_empty() {
+        return "No connections.".yellow().to_string();
+    }
+    let rows = conns
+        .iter()
+        .map(|c| {
+            let held = c.pending_approvals.len() as u64 + c.pending_approvals_more.unwrap_or(0);
+            vec![
+                c.id.clone(),
+                c.connector_name.clone(),
+                c.owner_type(),
+                c.owner_label.clone().unwrap_or_default(),
+                c.status.clone().unwrap_or_default(),
+                c.connected_count.unwrap_or(0).to_string(),
+                if held > 0 {
+                    held.to_string()
+                } else {
+                    String::new()
+                },
+            ]
+        })
+        .collect();
+    let mut out = format_table(
+        &[
+            "ID",
+            "CONNECTOR",
+            "OWNER TYPE",
+            "OWNER",
+            "STATUS",
+            "CONNECTED",
+            "HELD",
+        ],
+        rows,
+    );
+    let base = host.trim_end_matches('/');
+    for c in &conns {
+        let name = clean_text(&c.connector_name);
+        if c.is_held() {
+            out.push_str(&format!(
+                "\n\n{name} [{}] is held back on scheduled runs until someone it is shared \
+                 with, or a workspace admin, approves the role's latest instructions. The \
+                 credential is fine and changing the connector won't release it. Manual runs \
+                 still use it. A reconnect by someone it is shared with also approves.",
+                c.id
+            ));
+            for p in &c.pending_approvals {
+                let title = clean_text(p.nest_title.as_deref().unwrap_or(""));
+                let asked = p
+                    .asked_at
+                    .as_deref()
+                    .map(|a| format!(", asked {}", clean_text(a)))
+                    .unwrap_or_default();
+                let link = p
+                    .comment_path
+                    .as_deref()
+                    .map(|path| format!(": {}", sanitize(&format!("{base}{path}"))))
+                    .unwrap_or_default();
+                let you = if p.can_approve == Some(true) {
+                    " (you can approve)"
+                } else {
+                    ""
+                };
+                out.push_str(&format!("\n  - {title}{asked}{link}{you}"));
+            }
+            if let Some(more) = c.pending_approvals_more.filter(|m| *m > 0) {
+                out.push_str(&format!("\n  - and {more} more"));
+            }
+        }
+        if c.has_disallowed_shared_account() {
+            out.push_str(&format!(
+                "\n\n{name} [{}] has a shared account, but the connector no longer allows \
+                 shared accounts, so nobody uses it. Connect a personal account, or have a \
+                 workspace admin allow shared accounts in the app (workspace settings > \
+                 Integrations).",
+                c.id
+            ));
+        }
+    }
+    out
 }
 
 /// The result of binding a connector: the new connection and, for a role owner,
@@ -1302,6 +1422,9 @@ pub fn connection_bound(data: &Value, output: OutputFormat) -> Result<()> {
             println!(
                 "Nobody can use it until an account is connected: run `nestr connectors connections link {id}` and give the link to a person to open."
             );
+            if let Some(reach) = data.get("reach").and_then(shared_reach_sentence) {
+                println!("{reach}");
+            }
         }
     }
     Ok(())
@@ -1316,6 +1439,10 @@ pub fn connect_link(data: &Value, output: OutputFormat) -> Result<()> {
             eprintln!(
                 "Give this link to a person to open. They sign in or enter the key there, so the secret never passes through the CLI."
             );
+            // To stderr, like the line above, so stdout stays the bare URL.
+            if let Some(reach) = data.get("reach").and_then(shared_reach_sentence) {
+                eprintln!("Tell them first: {reach}");
+            }
         }
     }
     Ok(())
