@@ -27,6 +27,9 @@ pub struct CompactNest {
     pub all_day: Option<bool>,
     #[serde(default, rename = "parentId")]
     pub parent_id: Option<String>,
+    /// Only on a deleted nest: when it was deleted (`deleted:` searches).
+    #[serde(default, rename = "deletedAt")]
+    pub deleted_at: Option<String>,
 }
 
 impl CompactNest {

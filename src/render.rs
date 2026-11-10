@@ -56,11 +56,14 @@ pub fn print_json(value: &Value) -> Result<()> {
 }
 
 /// Standard compact table for any list of Nest-shaped objects.
+/// A DELETED column joins only when a row was deleted (a `deleted:` or
+/// `include-deleted:` search), so live listings keep their usual columns.
 pub fn nest_table(nests: &[CompactNest]) -> String {
+    let show_deleted = nests.iter().any(|n| n.deleted_at.is_some());
     let rows: Vec<Vec<String>> = nests
         .iter()
         .map(|n| {
-            vec![
+            let mut row = vec![
                 n.id.clone(),
                 n.title.clone(),
                 n.due.clone().unwrap_or_default(),
@@ -69,10 +72,18 @@ pub fn nest_table(nests: &[CompactNest]) -> String {
                     _ => String::new(),
                 },
                 n.labels_str(),
-            ]
+            ];
+            if show_deleted {
+                row.push(n.deleted_at.clone().unwrap_or_default());
+            }
+            row
         })
         .collect();
-    format_table(&["ID", "TITLE", "DUE", "DONE", "LABELS"], rows)
+    let mut headers = vec!["ID", "TITLE", "DUE", "DONE", "LABELS"];
+    if show_deleted {
+        headers.push("DELETED");
+    }
+    format_table(&headers, rows)
 }
 
 /// Render a list of Nest-shaped objects: raw JSON, or a compact table + footers.
