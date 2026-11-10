@@ -219,7 +219,7 @@ fn limit_in_message(message: &str) -> Option<u64> {
 /// Turn a refused upload into what to do about it. A 413 names the limit (the
 /// server's, or the one issued with the URL when a proxy answered) and never echoes
 /// the body, which may be a proxy's HTML page. A 404 or 410 may be a used or expired
-/// URL, or the nest gone since: the server's reason stays, plus the way out.
+/// URL, or (a 404) the nest gone since: the server's reason stays, plus the way out.
 fn upload_refused(e: NestrError, name: &str, size: u64, issued_max: Option<u64>) -> anyhow::Error {
     match e {
         NestrError::Api {
@@ -233,9 +233,14 @@ fn upload_refused(e: NestrError, name: &str, size: u64, issued_max: Option<u64>)
         NestrError::Api {
             status: 410,
             message,
-        }
-        | NestrError::NotFound(message) => anyhow!(
+        } => anyhow!(
             "the upload was refused: {} Run the command again; each run gets a fresh upload URL.",
+            message.trim_end_matches(" Request a new one.")
+        ),
+        // A 404 is a bad or expired URL, or the nest deleted since the URL was issued.
+        NestrError::NotFound(message) => anyhow!(
+            "the upload was refused: {} If the nest still exists, run the command again; each \
+             run gets a fresh upload URL.",
             message.trim_end_matches(" Request a new one.")
         ),
         other => other.into(),

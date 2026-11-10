@@ -118,6 +118,18 @@ async fn mount_upload_url(server: &MockServer, api: &str, request: serde_json::V
         .await;
 }
 
+/// What the CLI sent, minus the bodiless `HEAD /` probes a local port scanner can
+/// land on a listening mock; the CLI never sends HEAD.
+async fn sent(server: &MockServer) -> Vec<wiremock::Request> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method != wiremock::http::Method::HEAD)
+        .collect()
+}
+
 fn uploads(reqs: &[wiremock::Request]) -> Vec<&wiremock::Request> {
     reqs.iter()
         .filter(|r| r.url.path().starts_with("/api/file-uploads/"))
@@ -261,7 +273,7 @@ async fn upload_of_an_empty_file_is_refused_before_asking_for_a_url() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("empty"), "{err}");
-    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(sent(&server).await.is_empty());
 }
 
 #[tokio::test]
@@ -372,6 +384,34 @@ async fn upload_to_a_used_or_expired_url_says_to_run_it_again() {
     );
     assert!(msg.contains("again"), "says what to do: {msg}");
     assert!(!msg.contains("tok123"), "{msg}");
+}
+
+#[tokio::test]
+async fn upload_404_keeps_the_reason_and_only_suggests_a_retry_if_the_nest_exists() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "status": "error",
+            "message": "Nest not found"
+        })))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("Nest not found"), "{msg}");
+    assert!(msg.contains("If the nest still exists"), "{msg}");
 }
 
 #[tokio::test]
@@ -670,7 +710,7 @@ async fn upload_is_blocked_in_read_only_mode() {
     );
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("read-only"));
-    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(sent(&server).await.is_empty());
 }
 
 #[tokio::test]
@@ -684,7 +724,7 @@ async fn delete_needs_yes_outside_a_terminal() {
     );
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--yes"));
-    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(sent(&server).await.is_empty());
 }
 
 #[test]
