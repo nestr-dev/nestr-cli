@@ -8,7 +8,7 @@ a self-contained `SKILL.md`; reach for the one that matches your task.
 | [nestr-basics](nestr-basics/SKILL.md) | the everyday loop — search, read/edit nests, inbox, plan, comments |
 | [nestr-governance](nestr-governance/SKILL.md) | processing tensions — propose changes, consent, vote |
 | [nestr-org](nestr-org/SKILL.md) | administering structure — workspaces, circles, roles, users, groups |
-| [nestr-insights](nestr-insights/SKILL.md) | graph links, insights/metrics, and JSON export |
+| [nestr-insights](nestr-insights/SKILL.md) | graph links, insights/metrics, dataseries points, and JSON export |
 | [nestr-webhooks](nestr-webhooks/SKILL.md) | creating and managing workspace webhooks |
 | [nestr-agents](nestr-agents/SKILL.md) | agents and connectors — create, run, set a cadence, bind tools, connect accounts |
 
