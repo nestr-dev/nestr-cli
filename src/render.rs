@@ -986,9 +986,10 @@ pub fn compare_text(data: &Value, meta: Option<&Value>) -> String {
     let mut out = Vec::new();
     if let Some(m) = meta {
         let mut head = vec![format!("metric: {}", clean_text(str_of(m, "metricId")))];
-        let kind = str_of(m, "valueType");
-        if !kind.is_empty() {
-            head.push(format!("kind: {}", clean_text(kind)));
+        // A display format (percentage, range), not a dataType.
+        let format = str_of(m, "valueType");
+        if !format.is_empty() {
+            head.push(format!("format: {}", clean_text(format)));
         }
         let goal = str_of(m, "goal");
         if !goal.is_empty() {
@@ -1032,9 +1033,6 @@ pub fn compare_text(data: &Value, meta: Option<&Value>) -> String {
         ],
         rows,
     ));
-    if let Some(line) = meta.and_then(|m| semantics_line(meta, str_of(m, "valueType"))) {
-        out.push(line);
-    }
     if set_apart {
         out.push(
             "(parent) includes its child circles, so don't rank it against them."

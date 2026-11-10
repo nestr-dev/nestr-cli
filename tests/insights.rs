@@ -180,7 +180,7 @@ fn compare_body() -> serde_json::Value {
             "comparePeriod": {"from": "2026-08-31T00:00:00.000Z", "to": "2026-10-01T00:00:00.000Z"},
             "valueSemantics": {},
             "metricId": "tactical_completed", "parentNestId": "ws1",
-            "valueType": "count", "goal": "high"
+            "valueType": "percentage", "goal": "high"
         },
         "data": [
             {"nestId": "ws1", "title": "Acme", "isParent": true, "value": 30, "compareValue": 20,
@@ -274,6 +274,7 @@ fn compare_text_keeps_every_row_and_sets_the_parent_apart() {
     let parent = out.lines().find(|l| l.contains("Acme")).unwrap();
     assert!(parent.contains("parent"), "{parent}");
     assert!(out.contains("goal: high"), "{out}");
+    assert!(out.contains("format: percentage"), "{out}");
     assert!(
         out.contains("2026-08-31T00:00:00.000Z → 2026-10-01T00:00:00.000Z"),
         "{out}"

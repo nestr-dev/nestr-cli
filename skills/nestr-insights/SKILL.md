@@ -77,7 +77,8 @@ workspace. `--user me` needs a login that acts for one person (an OAuth profile)
 not a workspace API key. `--end-date` still works as a hidden alias of `--to`, and
 `--circle` as an alias of `--nest`.
 
-`compare` lists each child circle's value, compare value, change and direction.
+`compare` lists each child circle's value, compare value, change and direction, and
+the metric's display format (such as `percentage`).
 The parent row is marked `(parent)`: its value includes its children, so don't rank
 it against them.
 

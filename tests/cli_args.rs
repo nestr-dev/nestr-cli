@@ -321,3 +321,19 @@ fn series_points_order_rejects_unknown_value() {
     assert!(!out.status.success());
     assert!(stderr.contains("invalid value"), "{stderr}");
 }
+
+#[test]
+fn insights_compare_takes_a_bare_include_sub_circles_after_the_metric() {
+    assert_parses(&[
+        "insights",
+        "compare",
+        "tactical_completed",
+        "--include-sub-circles",
+    ]);
+    assert_parses(&[
+        "insights",
+        "compare",
+        "tactical_completed",
+        "--include-sub-circles=false",
+    ]);
+}
