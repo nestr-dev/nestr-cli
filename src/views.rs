@@ -491,11 +491,24 @@ pub struct PendingApprovalView {
     /// Whether the CALLER may approve it.
     #[serde(default, rename = "canApprove")]
     pub can_approve: Option<bool>,
+    /// The agent whose scheduled run is waiting, when the server recorded it.
+    #[serde(default, rename = "agentUserId")]
+    pub agent_user_id: Option<String>,
 }
 
 impl ConnectionView {
     pub fn is_held(&self) -> bool {
         !self.pending_approvals.is_empty() || self.pending_approvals_more.unwrap_or(0) > 0
+    }
+
+    /// Whether a run of this agent is among the waiting ones. An entry that names no
+    /// agent, or items past the server's read, may be this agent's, so they count.
+    pub fn is_held_for(&self, agent: &str) -> bool {
+        self.pending_approvals_more.unwrap_or(0) > 0
+            || self
+                .pending_approvals
+                .iter()
+                .any(|p| p.agent_user_id.as_deref().is_none_or(|a| a == agent))
     }
 
     /// A shared account sits on the binding but its connector no longer allows

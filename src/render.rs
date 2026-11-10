@@ -1115,12 +1115,13 @@ pub fn agent_run(data: &Value, output: OutputFormat) -> Result<()> {
 
 pub fn output_agent_reach(
     data: &Value,
+    agent: &str,
     connections: Option<&Value>,
     output: OutputFormat,
 ) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => println!("{}", agent_reach_text(data, connections)),
+        OutputFormat::Text => println!("{}", agent_reach_text(data, agent, connections)),
     }
     Ok(())
 }
@@ -1128,7 +1129,7 @@ pub fn output_agent_reach(
 /// An agent's reach as a table. `connections` is the workspace connections listing,
 /// when it could be read: the reach rows don't say a role connector is held back for
 /// instruction approval, the listing does, so the two are joined on the connection id.
-pub fn agent_reach_text(data: &Value, connections: Option<&Value>) -> String {
+pub fn agent_reach_text(data: &Value, agent: &str, connections: Option<&Value>) -> String {
     let reach: Vec<AgentReachView> = serde_json::from_value(data.clone()).unwrap_or_default();
     if reach.is_empty() {
         return "This agent can reach no connectors.".yellow().to_string();
@@ -1138,7 +1139,7 @@ pub fn agent_reach_text(data: &Value, connections: Option<&Value>) -> String {
         .unwrap_or_default();
     let held: std::collections::HashSet<&str> = listing
         .iter()
-        .filter(|c| c.is_held())
+        .filter(|c| c.is_held_for(agent))
         .map(|c| c.id.as_str())
         .collect();
     let mut any_held = false;
@@ -1183,7 +1184,7 @@ pub fn agent_reach_text(data: &Value, connections: Option<&Value>) -> String {
     );
     if any_held {
         out.push_str(
-            "\n\nheld: scheduled runs don't get this connector until someone it is shared with \
+            "\n\nheld: this agent's scheduled runs don't get this connector until someone it is shared with \
              approves the role's latest instructions. Manual runs still use it. \
              `nestr connectors connections list` shows where to approve.",
         );

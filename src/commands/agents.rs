@@ -383,7 +383,7 @@ pub async fn run(cmd: AgentsCmd, g: &GlobalArgs) -> Result<()> {
                 }
                 crate::config::OutputFormat::Json => None,
             };
-            render::output_agent_reach(&data, connections.as_ref(), cfg.output)?;
+            render::output_agent_reach(&data, &agent_id, connections.as_ref(), cfg.output)?;
         }
         // The mode routes are nest-scoped, so they need no workspace.
         AgentsCmd::Mode { cmd } => match cmd {

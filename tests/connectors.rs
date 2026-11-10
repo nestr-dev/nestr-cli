@@ -410,7 +410,8 @@ fn held_connection() -> serde_json::Value {
         "authorizations":[{"scope":"personal","connected":true}],
         "pendingInstructionApprovals":[{
             "nestId":"r1","nestTitle":"Finance","connectorName":"Gmail",
-            "askedAt":"2026-11-08T09:00:00.000Z","commentPath":"/n/r1?unblock=1","canApprove":true
+            "askedAt":"2026-11-08T09:00:00.000Z","commentPath":"/n/r1?unblock=1","canApprove":true,
+            "agentUserId":"agent1"
         }],
         "pendingInstructionApprovalsMore":2
     })
@@ -466,7 +467,7 @@ fn agent_reach_marks_a_connector_held_for_instruction_approval() {
         {"connectionId":"conn2","connectorName":"Drive","source":"workspace","available":true,
          "reason":null,"scope":"shared"}
     ]);
-    let out = render::agent_reach_text(&reach, Some(&json!([held_connection()])));
+    let out = render::agent_reach_text(&reach, "agent1", Some(&json!([held_connection()])));
     let gmail = out.lines().find(|l| l.contains("Gmail")).unwrap();
     let drive = out.lines().find(|l| l.contains("Drive")).unwrap();
     assert!(gmail.contains("held"), "{gmail}");
@@ -478,7 +479,7 @@ fn agent_reach_marks_a_connector_held_for_instruction_approval() {
 #[test]
 fn agent_reach_without_the_connections_listing_still_renders() {
     let reach = json!([{"connectionId":"conn1","connectorName":"Gmail","available":true}]);
-    let out = render::agent_reach_text(&reach, None);
+    let out = render::agent_reach_text(&reach, "agent1", None);
     assert!(out.contains("Gmail"), "{out}");
 }
 
@@ -547,4 +548,15 @@ fn connection_notes_strip_terminal_escapes_from_the_id() {
     c["connectionId"] = json!("conn\u{1b}[31m1");
     let out = render::connections_text(&json!([c]), "https://app.example.test");
     assert!(!out.contains('\u{1b}'), "{out:?}");
+}
+
+// The waiting runs are per agent: another agent's held run doesn't mark this one.
+#[test]
+fn agent_reach_ignores_a_run_held_for_another_agent() {
+    let reach = json!([{"connectionId":"conn1","connectorName":"Gmail","available":true}]);
+    let mut c = held_connection();
+    c["pendingInstructionApprovalsMore"] = json!(0);
+    let out = render::agent_reach_text(&reach, "agent2", Some(&json!([c])));
+    let gmail = out.lines().find(|l| l.contains("Gmail")).unwrap();
+    assert!(!gmail.contains("held"), "{gmail}");
 }

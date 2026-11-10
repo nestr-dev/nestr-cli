@@ -180,7 +180,7 @@ nestr connectors connections remove <connectionId>  # admin: the binding and eve
 
 ## Safety
 
-Every write (`create`, `update`, `run`, `mode set`/`clear`, `register`, `update`, `remove`,
+Every write (`agents create`/`update`/`run`/`mode set`/`mode clear`, `connectors register`/`update`/`remove`,
 `bind`, `revoke`) is blocked by `--read-only`. `remove` and `revoke` ask for
 confirmation (pass `--yes` in scripts/agents). `connections link` changes nothing and
 works under `--read-only`. No command takes or prints a credential. Add `-o json` for
