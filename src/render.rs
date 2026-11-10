@@ -1368,7 +1368,7 @@ pub fn connections_text(data: &Value, host: &str) -> String {
                  with, or a workspace admin, approves the role's latest instructions. The \
                  credential is fine and changing the connector won't release it. Manual runs \
                  still use it. A reconnect by someone it is shared with also approves.",
-                c.id
+                sanitize(&c.id)
             ));
             for p in &c.pending_approvals {
                 let title = clean_text(p.nest_title.as_deref().unwrap_or(""));
@@ -1399,7 +1399,7 @@ pub fn connections_text(data: &Value, host: &str) -> String {
                  shared accounts, so nobody uses it. Connect a personal account, or have a \
                  workspace admin allow shared accounts in the app (workspace settings > \
                  Integrations).",
-                c.id
+                sanitize(&c.id)
             ));
         }
     }

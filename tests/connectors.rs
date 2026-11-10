@@ -540,3 +540,11 @@ async fn connect_link_keeps_stdout_the_url_and_warns_about_a_shared_account_on_s
     assert_eq!(stdout.trim(), "https://app.example.test/n/ws?connect=c1");
     assert!(stderr.contains("3 people and 1 agent"), "stderr: {stderr}");
 }
+
+#[test]
+fn connection_notes_strip_terminal_escapes_from_the_id() {
+    let mut c = held_connection();
+    c["connectionId"] = json!("conn\u{1b}[31m1");
+    let out = render::connections_text(&json!([c]), "https://app.example.test");
+    assert!(!out.contains('\u{1b}'), "{out:?}");
+}
