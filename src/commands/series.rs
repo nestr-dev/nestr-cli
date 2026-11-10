@@ -159,9 +159,14 @@ impl AddOutcome {
     /// Why the command exits non-zero, if it should.
     pub fn failure(&self, total: usize) -> Option<String> {
         if let Some((sent, err)) = &self.stopped {
+            let refused = if self.failed == 0 {
+                String::new()
+            } else {
+                format!(", plus the {} refused points listed above", self.failed)
+            };
             return Some(format!(
                 "{err}\nPoints 1-{sent} were already sent ({} added, {} refused). \
-                 Resend only from point #{} on, or the added points are stored twice.",
+                 Resend only from point #{} on{refused}, or the added points are stored twice.",
                 self.created,
                 self.failed,
                 sent + 1
