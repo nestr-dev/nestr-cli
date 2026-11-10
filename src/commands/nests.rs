@@ -235,6 +235,12 @@ pub enum NestsCmd {
         #[command(subcommand)]
         cmd: crate::commands::recurrence::RecurrenceCmd,
     },
+    /// A nest's dataseries: list them, read their dated points, backfill, correct
+    /// or delete points.
+    Series {
+        #[command(subcommand)]
+        cmd: crate::commands::series::SeriesCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -618,6 +624,9 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
     if let NestsCmd::Recurrence { cmd } = cmd {
         return crate::commands::recurrence::run(cmd, g).await;
     }
+    if let NestsCmd::Series { cmd } = cmd {
+        return crate::commands::series::run(cmd, g).await;
+    }
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
         NestsCmd::Get {
@@ -821,7 +830,9 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
             };
             render::output_nest_detail(&data, &cfg.host, cfg.output)?;
         }
-        NestsCmd::Recurrence { .. } => unreachable!("dispatched above"),
+        NestsCmd::Recurrence { .. } | NestsCmd::Series { .. } => {
+            unreachable!("dispatched above")
+        }
     }
     Ok(())
 }
