@@ -149,6 +149,21 @@ number, `true` a boolean, `{…}` an object) and is sent as a plain string other
 quote as JSON (`'"true"'`) to force a string. Unknown keys are passed through and
 validated by the server.
 
+**Multi nest-link fields** (a `graphselect` field whose `--fields-meta` shows
+`conditions.multi`) hold a set of nest ids and read back as a list. Write the
+**whole set** as a JSON list: the server links the ids not yet linked and unlinks
+any you leave out, so re-list the ones to keep. `null` clears the field.
+
+```sh
+nestr nests update <id> --field '<label>.<field>=["<nestId1>","<nestId2>"]' --yes
+nestr nests update <id> --field '<label>.<field>=null' --yes
+```
+
+Each id must be a nest in the same workspace carrying one of the field's
+`conditions.labels`. A field you don't name is left alone. That holds for a
+multi-link field even on an API `PUT`, which rebuilds the other stored field values:
+its links change only when the field is named.
+
 ## Purpose vs description
 
 Two distinct fields on nests, circles, roles, and tension parts:

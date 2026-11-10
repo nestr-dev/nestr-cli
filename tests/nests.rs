@@ -722,3 +722,23 @@ async fn create_completed_sends_completed_true() {
 async fn create_without_completed_leaves_it_out() {
     assert_create_sends(&[], serde_json::json!({"title": "T"})).await;
 }
+
+// A multi nest-link field takes the whole set as a JSON list: the server links the ids
+// not yet linked and unlinks the ones left out. `null` clears it.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_field_sends_a_json_list_as_a_list() {
+    assert_update_sends(
+        &["--field", r#"ops.linked=["n7","n8"]"#],
+        serde_json::json!({"fields": {"ops.linked": ["n7", "n8"]}}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_field_null_clears_the_links() {
+    assert_update_sends(
+        &["--field", "ops.linked=null"],
+        serde_json::json!({"fields": {"ops.linked": null}}),
+    )
+    .await;
+}
