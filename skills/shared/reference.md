@@ -288,5 +288,5 @@ print this as a `url:` line in `-o text`; don't hand-build links from memory.
 | `workspaces`, `circles`, `roles`, `users`, `groups` | org structure & members; `workspaces docs` reference documents | nestr-org |
 | `links`, `insights`, `hints`, `export` | graph links, metrics, hint counts, JSON dumps | nestr-insights |
 | `webhooks` | workspace event subscriptions | nestr-webhooks |
-| `agents` | create and run agents; reactive or autonomous mode per nest | nestr-agents |
+| `agents` | create, update and run agents; reactive or autonomous mode per nest | nestr-agents |
 | `connectors` | connector catalog, bindings to roles, connect links | nestr-agents |

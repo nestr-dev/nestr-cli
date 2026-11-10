@@ -40,6 +40,22 @@ nestr agents connectors <agentId>                   # what it can use, and why n
 - `--config '<json>'` sets runtime wiring (`runtimeCallbackUrl`, `tokenTtlSeconds`).
   Leave it out for an agent that runs on Nestr's own runtime.
 
+### Change an agent (admin)
+
+```bash
+nestr agents update <agentId> --description "Calm, and careful with money"
+nestr agents update <agentId> --name Collab --web-search false
+nestr agents update <agentId> --status paused       # active, paused or disabled
+nestr agents update <agentId> --assistant           # never fills a role again
+nestr agents update <agentId> --assignable          # an assistant may fill roles again
+```
+
+Only the flags you pass change. With no flags the CLI refuses before sending
+anything. `--assistant` is refused while the agent still fills a role; the error
+names the roles to unassign it from first. `--config` replaces the stored wiring as a
+whole. This changes the agent, not its work: a stale *instruction* is fixed on the
+skill under the role, and moving it to other work means changing the role's users.
+
 ## Run an agent now (user login)
 
 ```bash
@@ -131,7 +147,7 @@ nestr connectors connections remove <connectionId>  # admin: the binding and eve
 
 ## Safety
 
-Every write (`create`, `run`, `mode set`/`clear`, `register`, `update`, `remove`,
+Every write (`create`, `update`, `run`, `mode set`/`clear`, `register`, `update`, `remove`,
 `bind`, `revoke`) is blocked by `--read-only`. `remove` and `revoke` ask for
 confirmation (pass `--yes` in scripts/agents). `connections link` changes nothing and
 works under `--read-only`. No command takes or prints a credential. Add `-o json` for

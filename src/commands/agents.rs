@@ -30,6 +30,12 @@ pub enum AgentsCmd {
         #[arg(long, value_name = "JSON")]
         config: Option<String>,
     },
+    /// Change an agent's settings (admin). Only the flags you pass change.
+    Update {
+        agent_id: String,
+        #[command(flatten)]
+        changes: AgentChanges,
+    },
     /// Run an agent now on a nest (needs a user or OAuth login, not an API key).
     Run {
         agent_id: String,
@@ -47,6 +53,35 @@ pub enum AgentsCmd {
         #[command(subcommand)]
         cmd: ModeCmd,
     },
+}
+
+/// The settings `agents update` can change. Every flag is optional; at least one is needed.
+#[derive(clap::Args, Debug, Default)]
+pub struct AgentChanges {
+    /// The agent's own name (e.g. "Collab"), not the name of the work it does.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// What the agent is like: its character, not its instructions (those live in a
+    /// skill on the role it fills).
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Make it an assistant, which can never be assigned to a role. Refused while it
+    /// still fills one: unassign it there first.
+    #[arg(long, conflicts_with = "assignable")]
+    pub assistant: bool,
+    /// Let an assistant be assigned to roles again.
+    #[arg(long)]
+    pub assignable: bool,
+    /// Whether it may search the web. Bare `--web-search` means true.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    pub web_search: Option<bool>,
+    /// active, paused or disabled.
+    #[arg(long, value_parser = ["active", "paused", "disabled"])]
+    pub status: Option<String>,
+    /// Runtime wiring as JSON, e.g. '{"runtimeCallbackUrl":"https://…","tokenTtlSeconds":300}'.
+    /// Replaces the stored wiring as a whole.
+    #[arg(long, value_name = "JSON")]
+    pub config: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -123,6 +158,41 @@ pub fn create_body(
     Value::Object(body)
 }
 
+/// Assemble the `PATCH /workspaces/:ws/agents/:userId` body from the flags passed.
+/// The server refuses an empty body, so an update that changes nothing is refused
+/// here, before a request goes out.
+pub fn update_body(changes: AgentChanges) -> crate::error::Result<Value> {
+    let mut body = Map::new();
+    if let Some(n) = changes.name {
+        body.insert("name".into(), n.into());
+    }
+    if let Some(d) = changes.description {
+        body.insert("description".into(), d.into());
+    }
+    if changes.assistant {
+        body.insert("roleAssignable".into(), false.into());
+    } else if changes.assignable {
+        body.insert("roleAssignable".into(), true.into());
+    }
+    if let Some(w) = changes.web_search {
+        body.insert("webSearch".into(), w.into());
+    }
+    if let Some(s) = changes.status {
+        body.insert("status".into(), s.into());
+    }
+    if let Some(c) = changes.config {
+        body.insert("agentConfig".into(), parse_json_object("--config", &c)?);
+    }
+    if body.is_empty() {
+        return Err(NestrError::Validation(
+            "Nothing to update: pass at least one of --name, --description, --assistant, \
+             --assignable, --web-search, --status, --config."
+                .into(),
+        ));
+    }
+    Ok(Value::Object(body))
+}
+
 /// Assemble the `PUT /nests/:id/agents/:userId/mode` body. `None` clears the
 /// nest's own setting. The cadence only travels with autonomous: the server
 /// ignores it on reactive, and sending it there reads as a schedule never set.
@@ -182,6 +252,18 @@ pub async fn create_agent(
 ) -> crate::error::Result<Value> {
     let raw: Value = client
         .post(&format!("/workspaces/{ws}/agents"), body)
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+pub async fn update_agent(
+    client: &NestrClient,
+    ws: &str,
+    agent: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(&format!("/workspaces/{ws}/agents/{agent}"), body)
         .await?;
     Ok(unwrap_data(raw).0)
 }
@@ -268,6 +350,13 @@ pub async fn run(cmd: AgentsCmd, g: &GlobalArgs) -> Result<()> {
                 .transpose()?;
             let body = create_body(name, description, assistant, config);
             let data = create_agent(&client, ws, &body).await?;
+            render::agent_detail(&data, cfg.output)?;
+        }
+        AgentsCmd::Update { agent_id, changes } => {
+            safety::enforce_read_only(g.read_only, "agents update")?;
+            let ws = cfg.require_workspace()?;
+            let body = update_body(changes)?;
+            let data = update_agent(&client, ws, &agent_id, &body).await?;
             render::agent_detail(&data, cfg.output)?;
         }
         AgentsCmd::Run {
