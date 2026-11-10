@@ -323,15 +323,16 @@ impl NestrClient {
         }
         let body = body.unwrap_or_default();
         // Only a JSON detail is shown: a body without one may be a proxy's HTML page.
-        let msg = extract_error_detail(&body)
-            .unwrap_or_else(|| format!("HTTP {} with no details.", status.as_u16()));
+        let detail = extract_error_detail(&body);
+        let has_detail = detail.is_some();
+        let msg = detail.unwrap_or_else(|| format!("HTTP {} with no details.", status.as_u16()));
         Err(match status {
             // No credential of the user's went along, so this is not their login failing.
             StatusCode::UNAUTHORIZED => NestrError::Api {
                 status: 401,
                 message: format!("the upload URL was not accepted: {msg}"),
             },
-            _ => self.status_error(status, &body, msg),
+            _ => self.status_error(status, &body, msg, has_detail),
         })
     }
 
@@ -370,11 +371,18 @@ impl NestrClient {
         let detail = extract_error_detail(&body);
         let has_detail = detail.is_some();
         let msg = detail.unwrap_or_else(|| body.clone());
-        Err(self.status_error(status, &body, msg))
+        Err(self.status_error(status, &body, msg, has_detail))
     }
 
     /// Map a non-success status to its error, with `msg` as the detail shown.
-    fn status_error(&self, status: StatusCode, body: &str, msg: String) -> NestrError {
+    /// `has_detail` says whether the body carried a JSON reason.
+    fn status_error(
+        &self,
+        status: StatusCode,
+        body: &str,
+        msg: String,
+        has_detail: bool,
+    ) -> NestrError {
         let code = status.as_u16();
         if status == StatusCode::FORBIDDEN {
             if let Some(e) = read_only_key_error(body).or_else(|| user_scope_error(&msg)) {
@@ -384,12 +392,12 @@ impl NestrClient {
             // framework's plain-text body, "Server error." in production. Passing that on
             // makes a refusal read as a fault.
             if !has_detail {
-                return Err(NestrError::Permission(
+                return NestrError::Permission(
                     "Nestr refused this request without saying why. Usually this login \
                      doesn't have the rights for it; check that you can do the same in the \
                      app."
                         .into(),
-                ));
+                );
             }
         }
         match status {

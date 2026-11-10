@@ -440,6 +440,33 @@ async fn upload_refusal_without_a_json_reason_shows_no_proxy_page() {
 }
 
 #[tokio::test]
+async fn upload_bare_403_reads_as_a_refusal_not_a_fault() {
+    let server = MockServer::start().await;
+    mount_upload_url(
+        &server,
+        "",
+        json!({"name": "a.txt", "contentType": "text/plain"}),
+        1024,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-uploads/n1/tok123"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Server error."))
+        .mount(&server)
+        .await;
+    let (_dir, src) = local_file("a.txt", b"abc");
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = files::upload_file(&client, "n1", "a.txt", "text/plain", &src, false)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("refused this request without saying why"),
+        "{msg}"
+    );
+}
+
+#[tokio::test]
 async fn upload_401_is_not_blamed_on_the_login() {
     // No API key goes to the upload URL, so a 401 there says nothing about the login.
     let server = MockServer::start().await;
