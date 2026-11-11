@@ -17,7 +17,8 @@ pub enum UsersCmd {
         search: Option<String>,
         #[arg(long)]
         include_suspended: bool,
-        /// Only members carrying this label (short id, e.g. legal_rep).
+        /// Only members carrying this label (short id, e.g. legal_rep). Needs a Nestr
+        /// server with user labels (rolling out).
         #[arg(long, value_name = "LABEL_ID")]
         label: Option<String>,
     },
@@ -48,7 +49,8 @@ pub enum UsersCmd {
         #[command(subcommand)]
         cmd: UserGroupsCmd,
     },
-    /// Put labels on people and set their user fields.
+    /// Put labels on people and set their user fields. Needs a Nestr server with
+    /// user labels (rolling out).
     Labels {
         #[command(subcommand)]
         cmd: UserLabelsCmd,
@@ -106,6 +108,35 @@ pub async fn fetch_list(
         .await?;
     let (data, meta, _) = unwrap_data(raw);
     Ok((data, meta))
+}
+
+/// Check that a `users list --label` reply was filtered by the label. A server with
+/// user labels puts `labels` (short ids) on every member and returns only those
+/// carrying the label; an older one ignores the param and returns everyone, with no
+/// `labels`. Such a list is refused rather than shown as the label's members.
+pub fn confirm_label_filter(data: &Value, label: &str, ws: &str) -> crate::error::Result<()> {
+    // The label may be given by its full id, `<ws>` plus a separator and the short id.
+    let matches = |short: &str| {
+        short == label
+            || (label.len() == ws.len() + 1 + short.len()
+                && label.starts_with(ws)
+                && label.ends_with(short))
+    };
+    let carries = |row: &Value| {
+        row.get("labels")
+            .and_then(Value::as_array)
+            .is_some_and(|ls| ls.iter().filter_map(Value::as_str).any(matches))
+    };
+    let rows = data.as_array().map(Vec::as_slice).unwrap_or_default();
+    if rows.iter().all(carries) {
+        return Ok(());
+    }
+    Err(crate::error::NestrError::Ignored(
+        "this Nestr server ignores --label on `nestr users list`, so it returned members \
+         without that label. They were not printed. --label needs a newer Nestr server \
+         (with user labels, rolling out)."
+            .into(),
+    ))
 }
 
 pub async fn fetch_get(client: &NestrClient, ws: &str, id: &str) -> crate::error::Result<Value> {
@@ -364,6 +395,9 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
                 params.push(("label", l));
             }
             let (data, _) = fetch_list(&client, &ws, &params).await?;
+            if let Some(l) = &label {
+                confirm_label_filter(&data, l, &ws)?;
+            }
             render_users(&data, cfg.output)?;
         }
         UsersCmd::Get { id } => {
