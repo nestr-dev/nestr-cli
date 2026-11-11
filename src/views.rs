@@ -100,6 +100,35 @@ pub struct LabelView {
     pub icon: Option<String>,
     #[serde(default, rename = "applicableTo", deserialize_with = "null_as_default")]
     pub applicable_to: Vec<String>,
+    /// Colour and icon as a single-label read (and an edit) returns them.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub display: LabelDisplay,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LabelDisplay {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+impl LabelView {
+    /// The colour to show: top-level when present, else the read's `display.color`.
+    pub fn shown_color(&self) -> &str {
+        self.color
+            .as_deref()
+            .or(self.display.color.as_deref())
+            .unwrap_or("")
+    }
+
+    /// The icon to show: top-level when present, else the read's `display.icon`.
+    pub fn shown_icon(&self) -> &str {
+        self.icon
+            .as_deref()
+            .or(self.display.icon.as_deref())
+            .unwrap_or("")
+    }
 }
 
 /// Extract display titles from an `accountabilities`/`domains` array, whose items

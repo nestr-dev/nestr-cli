@@ -51,7 +51,7 @@ workspace-scoped command with no active workspace errors with guidance to run
 `nestr workspaces use <id>` or pass `-w`.
 
 - **Need an active workspace:** `search` (workspace-wide), `projects`, `work`, `circles`,
-  `roles`, `users`, `groups`, `labels list`/`labels get`/`labels create`/`labels update`, `insights`, `export`,
+  `roles`, `users`, `groups`, `labels list`/`labels get`/`labels create`/`labels update`/`labels delete`, `insights`, `export`,
   `webhooks`, `workspaces apps`, `workspaces docs`, `nests bulk-reorder`, `connectors`,
   `agents` (except `agents mode`), and `hints` with no nest id.
 - **Don't (work by id, or account/user-level):** `nests get`/`create`/`update`/`delete`,

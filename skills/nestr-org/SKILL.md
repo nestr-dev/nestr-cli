@@ -75,6 +75,8 @@ nestr users labels remove <userId> legal_rep   # values are kept, hidden, and re
 nestr users labels activity <userId> --limit 20   # audit trail (workspace admins)
 nestr labels create "Legal rep" --applies-to nests,users --user-fields '[{"id":"url","code":"url","title":"Register","type":"url"}]'
 nestr labels update legal_rep --reset-applies-to   # back to nests only
+nestr labels create "Review" --id review --color '#ff5733' --icon eye --group flow
+nestr labels delete review --yes   # takes it off every item carrying it; cannot be undone
 nestr groups create "editors"
 ```
 
@@ -106,6 +108,6 @@ means "not found in the documents", not "the organisation has no position".
 ## Safety
 
 Admin writes (`circles`/`roles` `create`/`update`, `users add`/`update`,
-`users groups set`, `users labels add`/`set`/`remove`, `labels create`/`update`,
+`users groups set`, `users labels add`/`set`/`remove`, `labels create`/`update`/`delete`,
 `groups create`, `workspaces apps set`) are blocked by
 `--read-only`. Add `-o json` to any command to pipe structured data to `jq`.

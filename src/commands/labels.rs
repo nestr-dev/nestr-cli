@@ -20,10 +20,16 @@ pub enum LabelsCmd {
     /// Create a workspace label (admin).
     Create {
         title: String,
+        /// Id for the new label (e.g. review). Defaults to one derived from the title.
+        #[arg(long)]
+        id: Option<String>,
         #[arg(long)]
         color: Option<String>,
         #[arg(long)]
         icon: Option<String>,
+        /// Label group, used to group labels in pickers.
+        #[arg(long)]
+        group: Option<String>,
         #[command(flatten)]
         user_opts: UserLabelOpts,
     },
@@ -36,6 +42,9 @@ pub enum LabelsCmd {
         color: Option<String>,
         #[arg(long)]
         icon: Option<String>,
+        /// Label group, used to group labels in pickers.
+        #[arg(long)]
+        group: Option<String>,
         #[command(flatten)]
         user_opts: UserLabelOpts,
         /// Reset the label to apply to nests only.
@@ -45,6 +54,8 @@ pub enum LabelsCmd {
         #[arg(long, conflicts_with = "user_fields")]
         clear_user_fields: bool,
     },
+    /// Delete a workspace label (admin). It comes off every item carrying it.
+    Delete { label_id: String },
     /// Personal labels.
     Personal {
         #[command(subcommand)]
@@ -137,6 +148,17 @@ pub async fn update_workspace(
     Ok(unwrap_data(raw).0)
 }
 
+pub async fn delete_workspace(
+    client: &NestrClient,
+    workspace_id: &str,
+    label_id: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .delete(&format!("/workspaces/{workspace_id}/labels/{label_id}"))
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
 /// Parse `--user-fields`: a JSON array, or `@path` to a file holding one.
 pub fn parse_user_fields(arg: &str) -> crate::error::Result<Value> {
     let text = match arg.strip_prefix('@') {
@@ -158,12 +180,18 @@ pub fn label_body(
     title: Option<String>,
     color: Option<String>,
     icon: Option<String>,
+    group: Option<String>,
     opts: &UserLabelOpts,
     reset_applies_to: bool,
     clear_user_fields: bool,
 ) -> crate::error::Result<Value> {
     let mut map = serde_json::Map::new();
-    for (k, v) in [("title", title), ("color", color), ("icon", icon)] {
+    for (k, v) in [
+        ("title", title),
+        ("color", color),
+        ("icon", icon),
+        ("group", group),
+    ] {
         if let Some(v) = v {
             map.insert(k.into(), v.into());
         }
@@ -179,6 +207,34 @@ pub fn label_body(
         map.insert("userFields".into(), parse_user_fields(f)?);
     }
     Ok(Value::Object(map))
+}
+
+/// Body for label create. POST stores the body as the label itself, which keeps
+/// colour and icon under `properties` (only PATCH reads them as top-level
+/// shortcuts), so they move there; `id` becomes the label's `_id`.
+pub fn create_body(
+    title: String,
+    id: Option<String>,
+    color: Option<String>,
+    icon: Option<String>,
+    group: Option<String>,
+    opts: &UserLabelOpts,
+) -> crate::error::Result<Value> {
+    let mut body = label_body(Some(title), None, None, group, opts, false, false)?;
+    let map = body.as_object_mut().expect("label_body builds an object");
+    let mut properties = serde_json::Map::new();
+    for (k, v) in [("color", color), ("icon", icon)] {
+        if let Some(v) = v {
+            properties.insert(k.into(), v.into());
+        }
+    }
+    if !properties.is_empty() {
+        map.insert("properties".into(), Value::Object(properties));
+    }
+    if let Some(id) = id {
+        map.insert("_id".into(), id.into());
+    }
+    Ok(body)
 }
 
 pub async fn fetch_personal(
@@ -211,8 +267,8 @@ fn render_labels(data: &Value, output: crate::config::OutputFormat) -> Result<()
                     vec![
                         l.id.clone(),
                         l.title.clone().unwrap_or_default(),
-                        l.color.clone().unwrap_or_default(),
-                        l.icon.clone().unwrap_or_default(),
+                        l.shown_color().to_string(),
+                        l.shown_icon().to_string(),
                         l.applicable_to.join(","),
                     ]
                 })
@@ -281,12 +337,14 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
         }
         LabelsCmd::Create {
             title,
+            id,
             color,
             icon,
+            group,
             user_opts,
         } => {
             safety::enforce_read_only(g.read_only, "labels create")?;
-            let body = label_body(Some(title), color, icon, &user_opts, false, false)?;
+            let body = create_body(title, id, color, icon, group, &user_opts)?;
             let data = create_workspace(&client, cfg.require_workspace()?, &body).await?;
             output_label(&data, cfg.output)?;
         }
@@ -295,6 +353,7 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
             title,
             color,
             icon,
+            group,
             user_opts,
             reset_applies_to,
             clear_user_fields,
@@ -304,6 +363,7 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
                 title,
                 color,
                 icon,
+                group,
                 &user_opts,
                 reset_applies_to,
                 clear_user_fields,
@@ -314,6 +374,24 @@ pub async fn run(cmd: LabelsCmd, g: &GlobalArgs) -> Result<()> {
             let data =
                 update_workspace(&client, cfg.require_workspace()?, &label_id, &body).await?;
             output_label(&data, cfg.output)?;
+        }
+        LabelsCmd::Delete { label_id } => {
+            safety::enforce_read_only(g.read_only, "labels delete")?;
+            safety::confirm_destructive(
+                &format!(
+                    "Delete workspace label '{label_id}'? It comes off every item carrying it, \
+                     and this cannot be undone."
+                ),
+                g.yes,
+            )?;
+            let data = delete_workspace(&client, cfg.require_workspace()?, &label_id).await?;
+            match cfg.output {
+                crate::config::OutputFormat::Json => print_json(&data)?,
+                crate::config::OutputFormat::Text => {
+                    let id = data["_id"].as_str().unwrap_or(&label_id);
+                    println!("deleted label {}", render::clean_text(id));
+                }
+            }
         }
         LabelsCmd::Personal { cmd } => match cmd {
             PersonalCmd::List { search } => {
