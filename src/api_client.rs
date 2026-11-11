@@ -56,8 +56,10 @@ fn read_only_key_error(body: &str) -> Option<NestrError> {
 /// about the caller's own account (`users/me/...`) when the token's grant doesn't
 /// name the user, e.g. a grant for a workspace only. The token is fine; a refresh
 /// keeps the same grant, so say what the grant lacks instead.
-fn user_scope_error(msg: &str) -> Option<NestrError> {
-    msg.contains("single user scoped access").then(|| {
+/// `body` is matched too: `msg` may be a shortened excerpt of a plain-text body.
+fn user_scope_error(msg: &str, body: &str) -> Option<NestrError> {
+    const PHRASE: &str = "single user scoped access";
+    (msg.contains(PHRASE) || body.contains(PHRASE)).then(|| {
         NestrError::Permission(format!(
             "{msg}. This login's grant covers a workspace, not your own user account, \
              and this command needs your own user account. Run `nestr auth login` and grant \
@@ -415,11 +417,13 @@ impl NestrClient {
             resp.text().await.unwrap_or_default()
         };
         // On a success only the body decides, so an empty or bare-string answer
-        // labelled text/html still counts as the route's own.
+        // labelled text/html still counts as the route's own. On an error, a JSON
+        // reason wins over the label, so a real not-found keeps its message.
+        let detail = extract_error_detail(&body);
         let web_page = if status.is_success() {
             opens_with_tag(&body)
         } else {
-            is_web_page(content_type.as_deref(), &body)
+            detail.is_none() && is_web_page(content_type.as_deref(), &body)
         };
         let unsupported = |reply| NestrError::Unsupported {
             method: method.to_string(),
@@ -445,7 +449,6 @@ impl NestrClient {
                 body,
             });
         }
-        let detail = extract_error_detail(&body);
         let has_detail = detail.is_some();
         if web_page && !matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             return Err(non_json(status.as_u16(), content_type.as_deref(), &body));
@@ -469,7 +472,7 @@ impl NestrClient {
     ) -> NestrError {
         let code = status.as_u16();
         if status == StatusCode::FORBIDDEN {
-            if let Some(e) = read_only_key_error(body).or_else(|| user_scope_error(&msg)) {
+            if let Some(e) = read_only_key_error(body).or_else(|| user_scope_error(&msg, body)) {
                 return e;
             }
             // A refusal thrown inside the server (a write guard's) answers 403 with the

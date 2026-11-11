@@ -399,3 +399,43 @@ async fn a_success_typed_html_but_not_a_page_is_not_a_missing_route() {
         .unwrap();
     assert_eq!(v, serde_json::json!({}));
 }
+
+#[tokio::test]
+async fn a_json_not_found_labelled_html_keeps_its_own_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1"))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_raw(r#"{"description":"Nest not found"}"#, "text/html"),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/nests/n1", &[])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "not found: Nest not found");
+}
+
+#[tokio::test]
+async fn a_long_plain_text_scope_refusal_is_still_recognised() {
+    let server = MockServer::start().await;
+    let body = format!(
+        "{} This route is only available for single user scoped access",
+        "x".repeat(150)
+    );
+    Mock::given(method("GET"))
+        .and(path("/users/me/inbox"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(body, "text/plain"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let msg = client
+        .get::<serde_json::Value>("/users/me/inbox", &[])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(msg.contains("grant covers a workspace"), "{msg}");
+}
