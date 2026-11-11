@@ -365,17 +365,7 @@ pub async fn resolve_assignees(
     if !assignees.iter().any(|a| a == "me") {
         return Ok(assignees.to_vec());
     }
-    let me = crate::commands::me::fetch_me(client).await?;
-    let my_id = me
-        .get("_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if my_id.is_empty() {
-        return Err(crate::error::NestrError::Validation(
-            "could not resolve `--assignee me`: /users/me returned no id".into(),
-        ));
-    }
+    let my_id = crate::commands::me::my_id(client, "--assignee me").await?;
     Ok(assignees
         .iter()
         .map(|a| if a == "me" { my_id.clone() } else { a.clone() })

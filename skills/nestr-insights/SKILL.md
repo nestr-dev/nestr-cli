@@ -88,6 +88,13 @@ below Pro the server answers `402` with a message saying what Pro adds, which th
 CLI prints as is. The API returns no per-metric chart link. To link a chart in the
 web app, the pattern is `/n/<circleId>?i=1&show_chart=<metricType>`.
 
+Some insights options need a newer Nestr server: `--from` (list, get, compare), `--to`
+on `get`, `--nest`/`--user` on `history`, and `compare` itself. On an older server the
+CLI exits non-zero with "needs a newer Nestr server" instead of printing numbers for a
+period or scope other than the one you asked for. There `list --to` (alias `--end-date`)
+still works for an end date in the last four weeks; the period then starts one month
+before today, and the CLI says so on stderr.
+
 `insights history` covers Nestr's usage metrics only. The history of a metric nest,
 a goal or a burndown is a dataseries on that nest: read it with `nests series`.
 
