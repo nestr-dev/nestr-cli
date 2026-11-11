@@ -34,7 +34,13 @@ nestr agents connectors <agentId>                   # what it can use, and why n
 - `--name` is the agent's own name, not the name of the work. The work belongs to
   the role the agent fills.
 - `--description` is what the agent is *like*. Its instructions belong in a skill
-  nest under the role.
+  nest under the role. Skills on the role's circles and on the workspace root are
+  shared reference the agent can load when a task needs them, not instructions for
+  the role. Placement decides who gets a skill: under a role, that role only; under
+  a circle, every role below it; under the workspace root, every role in the
+  workspace. Put a new skill on the role if only that role needs it, on the lowest
+  circle whose roles all need it, and on the workspace root only for
+  organisation-wide knowledge.
 - `--assistant` makes an agent that can never fill a role, so it always acts with
   the authority of the person it helps. Put it on the task beside that person.
 - `--config '<json>'` sets runtime wiring (`runtimeCallbackUrl`, `tokenTtlSeconds`).

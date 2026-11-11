@@ -85,6 +85,19 @@ unread posts). In text mode each prints as a `warning:` / `note:` / `hint:` line
 keyed as the API sends them (`{"warnings":[…]}`). Read stderr after a write: a
 `warning:` there means part of the request was not saved.
 
+**Search depth.** `depth:n` looks n levels down from the search context. `depth:-n`
+looks up: it returns the direct children of the context and of each of its n nearest
+ancestors (clamped at the root), and does not reach siblings' subtrees. From a role,
+`label:skill depth:-25` lists the role's own skills plus every shared skill above it:
+
+```bash
+nestr nests children <roleId> --search "label:skill depth:-25"
+```
+
+Role reads also carry a `shared_skills` hint (`count`, `sources` nearest circle first,
+and a url to that search), separate from the `skills` hint, which counts only the
+role's own skills.
+
 Most list commands paginate with `--limit` and `--page` (page-based); pass `--page N`
 to fetch the next page when the footer shows more. (`notifications list` is the
 exception — it pages with `--limit`/`--skip`.)
