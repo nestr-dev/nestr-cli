@@ -77,7 +77,13 @@ pub const REPLY_EMPTY_405: &str = "HTTP 405 and an empty body";
 /// Whether a reply is a web page: an HTML content type, or a body that opens with a tag.
 pub fn is_web_page(content_type: Option<&str>, body: &str) -> bool {
     content_type.is_some_and(|c| c.to_ascii_lowercase().contains("text/html"))
-        || body.trim_start().starts_with('<')
+        || opens_with_tag(body)
+}
+
+/// Whether a body opens with a tag, as the web app's page (`<!DOCTYPE html>`) does.
+/// On a success this alone decides: the label can be wrong, the body can't be JSON.
+pub fn opens_with_tag(body: &str) -> bool {
+    body.trim_start().starts_with('<')
 }
 
 /// A short, terminal-safe, single-line excerpt of a body for an error message.

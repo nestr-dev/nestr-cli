@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 
 use crate::config::OutputFormat;
 use crate::error::{
-    body_excerpt, extract_error_detail, is_web_page, non_json, NestrError, Result, REPLY_EMPTY_405,
-    REPLY_WEB_PAGE,
+    body_excerpt, extract_error_detail, is_web_page, non_json, opens_with_tag, NestrError, Result,
+    REPLY_EMPTY_405, REPLY_WEB_PAGE,
 };
 use crate::notices;
 use crate::oauth::ReactiveRefresh;
@@ -347,7 +347,7 @@ impl NestrClient {
                 content_type,
                 body: body?,
             };
-            if is_web_page(reply.content_type.as_deref(), &reply.body) {
+            if opens_with_tag(&reply.body) {
                 return Err(non_json(reply.status, reply.content_type.as_deref(), ""));
             }
             return self.parse_with_notices(&reply);
@@ -414,7 +414,13 @@ impl NestrClient {
         } else {
             resp.text().await.unwrap_or_default()
         };
-        let web_page = is_web_page(content_type.as_deref(), &body);
+        // On a success only the body decides, so an empty or bare-string answer
+        // labelled text/html still counts as the route's own.
+        let web_page = if status.is_success() {
+            opens_with_tag(&body)
+        } else {
+            is_web_page(content_type.as_deref(), &body)
+        };
         let unsupported = |reply| NestrError::Unsupported {
             method: method.to_string(),
             path: path.to_string(),

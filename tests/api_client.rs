@@ -371,3 +371,31 @@ async fn a_json_error_body_still_renders_as_before() {
         .unwrap_err();
     assert_eq!(err.to_string(), "API error (500): boom");
 }
+
+#[tokio::test]
+async fn a_success_typed_html_but_not_a_page_is_not_a_missing_route() {
+    // Only the body decides on a 2xx: an empty body or a bare string labelled
+    // text/html is still the route's answer, not the web app's page.
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/workspaces/ws1/webhooks/w1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("\"success\"", "text/html"))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/n1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("", "text/html"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = client
+        .delete_text("/workspaces/ws1/webhooks/w1")
+        .await
+        .unwrap();
+    assert_eq!(body, "\"success\"");
+    let v: serde_json::Value = client
+        .patch("/nests/n1", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(v, serde_json::json!({}));
+}
