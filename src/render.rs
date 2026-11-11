@@ -56,11 +56,14 @@ pub fn print_json(value: &Value) -> Result<()> {
 }
 
 /// Standard compact table for any list of Nest-shaped objects.
+/// A DELETED column joins only when a row was deleted (a `deleted:` or
+/// `include-deleted:` search), so live listings keep their usual columns.
 pub fn nest_table(nests: &[CompactNest]) -> String {
+    let show_deleted = nests.iter().any(|n| n.deleted_at.is_some());
     let rows: Vec<Vec<String>> = nests
         .iter()
         .map(|n| {
-            vec![
+            let mut row = vec![
                 n.id.clone(),
                 n.title.clone(),
                 n.due.clone().unwrap_or_default(),
@@ -69,10 +72,18 @@ pub fn nest_table(nests: &[CompactNest]) -> String {
                     _ => String::new(),
                 },
                 n.labels_str(),
-            ]
+            ];
+            if show_deleted {
+                row.push(n.deleted_at.clone().unwrap_or_default());
+            }
+            row
         })
         .collect();
-    format_table(&["ID", "TITLE", "DUE", "DONE", "LABELS"], rows)
+    let mut headers = vec!["ID", "TITLE", "DUE", "DONE", "LABELS"];
+    if show_deleted {
+        headers.push("DELETED");
+    }
+    format_table(&headers, rows)
 }
 
 /// Render a list of Nest-shaped objects: raw JSON, or a compact table + footers.
@@ -817,7 +828,7 @@ pub fn output_children(data: &Value, output: OutputFormat) -> Result<()> {
 }
 
 /// Render an optional metric value, dropping a trailing `.0` on integral floats.
-fn fmt_num(v: Option<f64>) -> String {
+pub fn fmt_num(v: Option<f64>) -> String {
     match v {
         None => String::new(),
         Some(n) if n.fract() == 0.0 => format!("{}", n as i64),
@@ -871,55 +882,177 @@ pub fn insight_table(insights: &[InsightView]) -> String {
             vec![
                 i.type_.clone().unwrap_or_default(),
                 i.title.clone().unwrap_or_default(),
+                i.data_type.clone().unwrap_or_default(),
                 fmt_num(i.current_value),
                 fmt_num(i.compare_value),
                 i.goal.clone().unwrap_or_default(),
             ]
         })
         .collect();
-    format_table(&["TYPE", "TITLE", "CURRENT", "COMPARE", "GOAL"], rows)
+    format_table(
+        &["TYPE", "TITLE", "KIND", "CURRENT", "COMPARE", "GOAL"],
+        rows,
+    )
 }
 
-pub fn output_insights(data: &Value, output: OutputFormat) -> Result<()> {
-    match output {
-        OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let insights: Vec<InsightView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if insights.is_empty() {
-                print_no_results("No insights.");
-                return Ok(());
-            }
-            println!("{}", insight_table(&insights));
-        }
-    }
-    Ok(())
+/// `from → to` of a `{from, to}` period in an insights meta, as the server sent it.
+fn period_span(meta: Option<&Value>, key: &str) -> Option<String> {
+    let p = meta?.get(key)?;
+    let from = p.get("from").and_then(Value::as_str)?;
+    let to = p.get("to").and_then(Value::as_str)?;
+    Some(format!("{} → {}", clean_text(from), clean_text(to)))
 }
 
-pub fn insight_detail(data: &Value, output: OutputFormat) -> Result<()> {
-    match output {
-        OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
-            println!(
-                "{}  [{}]",
-                clean_text(&i.title.clone().unwrap_or_default()),
-                clean_text(&i.type_.clone().unwrap_or_default())
-            );
-            if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
-                println!("description: {}", clean_text(d));
-            }
-            println!(
-                "current: {}  (was {})",
-                fmt_num(i.current_value),
-                fmt_num(i.compare_value)
-            );
-            if let Some(g) = &i.goal {
-                println!("goal: {}", clean_text(g));
-            }
+/// The two lines naming the exact dates an insight analysed and compared against.
+fn period_lines(meta: Option<&Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(p) = period_span(meta, "period") {
+        out.push(format!("period:   {p}"));
+    }
+    if let Some(c) = period_span(meta, "comparePeriod") {
+        out.push(format!("compared: {c}"));
+    }
+    out
+}
+
+/// How a value of this kind reads against the periods, in the server's words
+/// (`meta.valueSemantics`), so the CLI never states it differently.
+fn semantics_line(meta: Option<&Value>, kind: &str) -> Option<String> {
+    let s = meta?.get("valueSemantics")?.get(kind)?.as_str()?;
+    Some(format!("{}: {}", clean_text(kind), clean_text(s)))
+}
+
+/// `insights list` in text: the periods, the table, then how each kind present reads.
+pub fn insights_text(data: &Value, meta: Option<&Value>) -> String {
+    let insights: Vec<InsightView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if insights.is_empty() {
+        return "No insights.".yellow().to_string();
+    }
+    let mut out = period_lines(meta);
+    out.push(insight_table(&insights));
+    let mut kinds: Vec<&str> = Vec::new();
+    for k in insights.iter().filter_map(|i| i.data_type.as_deref()) {
+        if !kinds.contains(&k) {
+            kinds.push(k);
         }
     }
-    Ok(())
+    out.extend(kinds.iter().filter_map(|k| semantics_line(meta, k)));
+    out.join("\n")
+}
+
+/// `insights get` in text: the value and its compare value, each with its period.
+pub fn insight_detail_text(data: &Value, meta: Option<&Value>) -> String {
+    let i: InsightView = serde_json::from_value(data.clone()).unwrap_or_default();
+    let mut out = vec![format!(
+        "{}  [{}]",
+        clean_text(&i.title.clone().unwrap_or_default()),
+        clean_text(&i.type_.clone().unwrap_or_default())
+    )];
+    if let Some(d) = i.description.as_deref().filter(|s| !s.is_empty()) {
+        out.push(format!("description: {}", clean_text(d)));
+    }
+    let period = period_span(meta, "period");
+    let compared = period_span(meta, "comparePeriod");
+    let with = |v: String, span: Option<String>| match span {
+        Some(s) => format!("{v}  ({s})"),
+        None => v,
+    };
+    out.push(with(
+        format!("current: {}", fmt_num(i.current_value)),
+        period,
+    ));
+    out.push(with(
+        format!("compare: {}", fmt_num(i.compare_value)),
+        compared,
+    ));
+    if let Some(line) = i.data_type.as_deref().and_then(|k| semantics_line(meta, k)) {
+        out.push(line);
+    }
+    if let Some(g) = &i.goal {
+        out.push(format!("goal: {}", clean_text(g)));
+    }
+    out.join("\n")
+}
+
+/// A compare row's percent change: a number, or the string `Infinity` the
+/// server sends for a change from zero.
+fn fmt_percent(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::Number(n)) => {
+            let f = n.as_f64().unwrap_or_default();
+            let sign = if f > 0.0 { "+" } else { "" };
+            format!("{sign}{}%", fmt_num(Some(f)))
+        }
+        Some(Value::String(s)) => clean_text(s),
+        _ => String::new(),
+    }
+}
+
+/// `insights compare` in text: one row per circle, the parent set apart because
+/// its value includes its children.
+pub fn compare_text(data: &Value, meta: Option<&Value>) -> String {
+    let rows_in = data.as_array().cloned().unwrap_or_default();
+    if rows_in.is_empty() {
+        return "No circles to compare.".yellow().to_string();
+    }
+    let mut out = Vec::new();
+    if let Some(m) = meta {
+        let mut head = vec![format!("metric: {}", clean_text(str_of(m, "metricId")))];
+        // A display format (percentage, range), not a dataType.
+        let format = str_of(m, "valueType");
+        if !format.is_empty() {
+            head.push(format!("format: {}", clean_text(format)));
+        }
+        let goal = str_of(m, "goal");
+        if !goal.is_empty() {
+            head.push(format!("goal: {}", clean_text(goal)));
+        }
+        out.push(head.join("  "));
+    }
+    out.extend(period_lines(meta));
+    let mut set_apart = false;
+    let rows = rows_in
+        .iter()
+        .map(|r| {
+            let apart = r.get("excludeFromComparison").and_then(Value::as_bool) == Some(true)
+                || r.get("isParent").and_then(Value::as_bool) == Some(true);
+            set_apart |= apart;
+            let title = str_of(r, "title").to_string();
+            vec![
+                if apart {
+                    format!("{title} (parent)")
+                } else {
+                    title
+                },
+                str_of(r, "nestId").to_string(),
+                fmt_num(r.get("value").and_then(Value::as_f64)),
+                fmt_num(r.get("compareValue").and_then(Value::as_f64)),
+                fmt_num(r.get("delta").and_then(Value::as_f64)),
+                fmt_percent(r.get("deltaPercent")),
+                str_of(r, "direction").to_string(),
+            ]
+        })
+        .collect();
+    out.push(format_table(
+        &[
+            "CIRCLE",
+            "ID",
+            "VALUE",
+            "COMPARE",
+            "DELTA",
+            "CHANGE",
+            "DIRECTION",
+        ],
+        rows,
+    ));
+    if set_apart {
+        out.push(
+            "(parent) includes its child circles, so don't rank it against them."
+                .dimmed()
+                .to_string(),
+        );
+    }
+    out.join("\n")
 }
 
 /// Render an insight-history point array (`{date, value}`) as a DATE·VALUE table.
@@ -948,6 +1081,97 @@ pub fn output_history(data: &Value, output: OutputFormat) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Under `-o json`, a response's `meta` (the periods an insight covers, whether a
+/// point list has more) goes to stderr as one `{"meta": …}` line, so stdout stays
+/// the bare data and scripts that pipe it keep working. Nothing in text mode.
+pub fn emit_meta(meta: Option<&Value>, output: OutputFormat) {
+    if output != OutputFormat::Json {
+        return;
+    }
+    if let Some(m) = meta.filter(|m| m.as_object().is_some_and(|o| !o.is_empty())) {
+        eprintln!("{}", serde_json::json!({ "meta": m }));
+    }
+}
+
+fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
+    v.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+/// `nests series list` as a table: one row per series.
+pub fn series_text(data: &Value) -> String {
+    let list = data.as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        return "This nest has no dataseries.".yellow().to_string();
+    }
+    let rows = list
+        .iter()
+        .map(|s| {
+            let current = s
+                .get("current")
+                .filter(|c| c.is_object())
+                .map(|c| {
+                    format!(
+                        "{} at {}",
+                        fmt_num(c.get("value").and_then(Value::as_f64)),
+                        str_of(c, "date")
+                    )
+                })
+                .unwrap_or_else(|| "-".into());
+            let state = if s.get("hidden").and_then(Value::as_bool) == Some(true) {
+                "hidden: read-only"
+            } else {
+                "in use"
+            };
+            vec![
+                str_of(s, "key").to_string(),
+                str_of(s, "seriesId").to_string(),
+                str_of(s, "dataType").to_string(),
+                str_of(s, "trackedField").to_string(),
+                current,
+                state.to_string(),
+            ]
+        })
+        .collect();
+    format_table(
+        &["KEY", "SERIES", "KIND", "TRACKS", "CURRENT", "STATE"],
+        rows,
+    )
+}
+
+/// `nests series points` as an ID·DATE·VALUE table, with a footer when the
+/// server held points back (`meta.has_more`): there is no cursor, so narrow.
+pub fn points_text(data: &Value, meta: Option<&Value>) -> String {
+    let points = data.as_array().cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    if points.is_empty() {
+        out.push("No points.".yellow().to_string());
+    } else {
+        let rows = points
+            .iter()
+            .map(|p| {
+                vec![
+                    str_of(p, "id").to_string(),
+                    str_of(p, "date").to_string(),
+                    fmt_num(p.get("value").and_then(Value::as_f64)),
+                ]
+            })
+            .collect();
+        out.push(format_table(&["ID", "DATE", "VALUE"], rows));
+    }
+    let has_more = meta
+        .and_then(|m| m.get("has_more"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if has_more {
+        out.push(
+            "more points: narrow --from/--to to read the rest, or raise --limit (max 5000)"
+                .dimmed()
+                .to_string(),
+        );
+    }
+    out.join("\n")
 }
 
 pub fn webhook_table(hooks: &[WebhookView]) -> String {
@@ -1103,83 +1327,144 @@ pub fn agent_run(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-pub fn output_agent_reach(data: &Value, output: OutputFormat) -> Result<()> {
+pub fn output_agent_reach(
+    data: &Value,
+    agent: &str,
+    connections: Option<&Value>,
+    output: OutputFormat,
+) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let reach: Vec<AgentReachView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if reach.is_empty() {
-                print_no_results("This agent can reach no connectors.");
-                return Ok(());
-            }
-            let rows = reach
-                .iter()
-                .map(|r| {
-                    let via = match (&r.role_title, &r.domain_title) {
-                        (Some(role), Some(domain)) => format!("{role} / {domain}"),
-                        (Some(role), None) => role.clone(),
-                        _ => String::new(),
-                    };
-                    vec![
-                        r.connector_name.clone(),
-                        yes_no(r.available),
-                        r.source.clone().unwrap_or_default(),
-                        via,
-                        r.reason.clone().unwrap_or_default(),
-                        r.connection_id.clone(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(
-                    &[
-                        "CONNECTOR",
-                        "AVAILABLE",
-                        "SOURCE",
-                        "VIA",
-                        "REASON",
-                        "CONNECTION"
-                    ],
-                    rows
-                )
-            );
-        }
+        OutputFormat::Text => println!("{}", agent_reach_text(data, agent, connections)),
     }
     Ok(())
+}
+
+/// An agent's reach as a table. `connections` is the workspace connections listing,
+/// when it could be read: the reach rows don't say a role connector is held back for
+/// instruction approval, the listing does, so the two are joined on the connection id.
+pub fn agent_reach_text(data: &Value, agent: &str, connections: Option<&Value>) -> String {
+    let reach: Vec<AgentReachView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if reach.is_empty() {
+        return "This agent can reach no connectors.".yellow().to_string();
+    }
+    let listing: Vec<ConnectionView> = connections
+        .and_then(|c| serde_json::from_value(c.clone()).ok())
+        .unwrap_or_default();
+    let held: std::collections::HashSet<&str> = listing
+        .iter()
+        .filter(|c| c.is_held_for(agent))
+        .map(|c| c.id.as_str())
+        .collect();
+    let mut any_held = false;
+    let rows = reach
+        .iter()
+        .map(|r| {
+            let via = match (&r.role_title, &r.domain_title) {
+                (Some(role), Some(domain)) => format!("{role} / {domain}"),
+                (Some(role), None) => role.clone(),
+                _ => String::new(),
+            };
+            let is_held = held.contains(r.connection_id.as_str());
+            any_held |= is_held;
+            vec![
+                r.connector_name.clone(),
+                yes_no(r.available),
+                r.source.clone().unwrap_or_default(),
+                via,
+                r.scope.clone().unwrap_or_default(),
+                if is_held {
+                    "held".into()
+                } else {
+                    String::new()
+                },
+                r.reason.clone().unwrap_or_default(),
+                r.connection_id.clone(),
+            ]
+        })
+        .collect();
+    let mut out = format_table(
+        &[
+            "CONNECTOR",
+            "AVAILABLE",
+            "SOURCE",
+            "VIA",
+            "ACCOUNT",
+            "SCHEDULED",
+            "REASON",
+            "CONNECTION",
+        ],
+        rows,
+    );
+    if any_held {
+        out.push_str(
+            "\n\nheld: this agent's scheduled runs don't get this connector until someone it is shared with \
+             approves the role's latest instructions. Manual runs still use it. \
+             `nestr connectors connections list` shows where to approve.",
+        );
+    }
+    out
 }
 
 pub fn output_connectors(data: &Value, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let connectors: Vec<ConnectorView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if connectors.is_empty() {
-                print_no_results("No connectors.");
-                return Ok(());
-            }
-            let rows = connectors
-                .iter()
-                .map(|c| {
-                    vec![
-                        c.id.clone(),
-                        c.name.clone(),
-                        c.type_.clone().unwrap_or_default(),
-                        c.auth_strategy.clone().unwrap_or_default(),
-                        yes_no(c.enabled),
-                        c.target(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(&["ID", "NAME", "TYPE", "AUTH", "ENABLED", "TARGET"], rows)
-            );
-        }
+        OutputFormat::Text => println!("{}", connectors_text(data)),
     }
     Ok(())
+}
+
+/// The catalog as a table. SHARED is whether one shared account may stand in for
+/// everyone who reaches the connector; it is off until an admin allows it in the app.
+pub fn connectors_text(data: &Value) -> String {
+    let connectors: Vec<ConnectorView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if connectors.is_empty() {
+        return "No connectors.".yellow().to_string();
+    }
+    let rows = connectors
+        .iter()
+        .map(|c| {
+            vec![
+                c.id.clone(),
+                c.name.clone(),
+                c.type_.clone().unwrap_or_default(),
+                c.auth_strategy.clone().unwrap_or_default(),
+                yes_no(c.enabled),
+                yes_no(Some(c.allows_shared())),
+                c.target(),
+            ]
+        })
+        .collect();
+    format_table(
+        &["ID", "NAME", "TYPE", "AUTH", "ENABLED", "SHARED", "TARGET"],
+        rows,
+    )
+}
+
+/// Who a shared account on a connection would reach, from the `reach` the bind and
+/// connect-link responses carry. `None` when sharing does not apply (the server
+/// sends null: the connector allows no shared account, or one person or agent owns it).
+pub fn shared_reach_sentence(reach: &Value) -> Option<String> {
+    let boundary = reach.get("boundary").and_then(Value::as_str)?;
+    let count = |key: &str| reach.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let (people, agents) = (count("people"), count("agents"));
+    let where_ = if boundary == "workspace" {
+        "the workspace"
+    } else {
+        "the role"
+    };
+    let people = format!("{people} {}", if people == 1 { "person" } else { "people" });
+    let agents = format!("{agents} {}", if agents == 1 { "agent" } else { "agents" });
+    let later = if reach.get("growsWithMembership").and_then(Value::as_bool) == Some(true) {
+        ", plus anyone who joins later"
+    } else {
+        ""
+    };
+    Some(format!(
+        "A shared account here would be used by everyone in {where_}: {people} and {agents} \
+         today{later}. Whoever opens the link should connect a personal account just for \
+         themselves; share only a service account."
+    ))
 }
 
 pub fn connector_detail(data: &Value, output: OutputFormat) -> Result<()> {
@@ -1198,6 +1483,14 @@ pub fn connector_detail(data: &Value, output: OutputFormat) -> Result<()> {
                 println!("target: {}", clean_text(&target));
             }
             println!("enabled: {}", yes_no(c.enabled));
+            if c.allows_shared() {
+                println!("shared accounts: allowed");
+            } else {
+                println!(
+                    "shared accounts: off (everyone connects their own; a workspace admin can \
+                     allow one in the app, under workspace settings > Integrations)"
+                );
+            }
         }
     }
     Ok(())
@@ -1234,46 +1527,98 @@ pub fn output_connector_templates(data: &Value, output: OutputFormat) -> Result<
     Ok(())
 }
 
-pub fn output_connections(data: &Value, output: OutputFormat) -> Result<()> {
+pub fn output_connections(data: &Value, host: &str, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
-        OutputFormat::Text => {
-            let conns: Vec<ConnectionView> =
-                serde_json::from_value(data.clone()).unwrap_or_default();
-            if conns.is_empty() {
-                print_no_results("No connections.");
-                return Ok(());
-            }
-            let rows = conns
-                .iter()
-                .map(|c| {
-                    vec![
-                        c.id.clone(),
-                        c.connector_name.clone(),
-                        c.owner_type(),
-                        c.owner_label.clone().unwrap_or_default(),
-                        c.status.clone().unwrap_or_default(),
-                        c.connected_count.unwrap_or(0).to_string(),
-                    ]
-                })
-                .collect();
-            println!(
-                "{}",
-                format_table(
-                    &[
-                        "ID",
-                        "CONNECTOR",
-                        "OWNER TYPE",
-                        "OWNER",
-                        "STATUS",
-                        "CONNECTED"
-                    ],
-                    rows
-                )
-            );
-        }
+        OutputFormat::Text => println!("{}", connections_text(data, host)),
     }
     Ok(())
+}
+
+/// The connections listing as a table, then a note under it for each connection that
+/// would otherwise look broken: a role connector held back on scheduled runs pending
+/// instruction approval, or a shared account its connector no longer allows.
+pub fn connections_text(data: &Value, host: &str) -> String {
+    let conns: Vec<ConnectionView> = serde_json::from_value(data.clone()).unwrap_or_default();
+    if conns.is_empty() {
+        return "No connections.".yellow().to_string();
+    }
+    let rows = conns
+        .iter()
+        .map(|c| {
+            let held = c.pending_approvals.len() as u64 + c.pending_approvals_more.unwrap_or(0);
+            vec![
+                c.id.clone(),
+                c.connector_name.clone(),
+                c.owner_type(),
+                c.owner_label.clone().unwrap_or_default(),
+                c.status.clone().unwrap_or_default(),
+                c.connected_count.unwrap_or(0).to_string(),
+                if held > 0 {
+                    held.to_string()
+                } else {
+                    String::new()
+                },
+            ]
+        })
+        .collect();
+    let mut out = format_table(
+        &[
+            "ID",
+            "CONNECTOR",
+            "OWNER TYPE",
+            "OWNER",
+            "STATUS",
+            "CONNECTED",
+            "HELD",
+        ],
+        rows,
+    );
+    let base = host.trim_end_matches('/');
+    for c in &conns {
+        let name = clean_text(&c.connector_name);
+        if c.is_held() {
+            out.push_str(&format!(
+                "\n\n{name} [{}] is held back on scheduled runs until someone it is shared \
+                 with, or a workspace admin, approves the role's latest instructions. The \
+                 credential is fine and changing the connector won't release it. Manual runs \
+                 still use it. A reconnect by someone it is shared with also approves.",
+                sanitize(&c.id)
+            ));
+            for p in &c.pending_approvals {
+                let title = clean_text(p.nest_title.as_deref().unwrap_or(""));
+                let asked = p
+                    .asked_at
+                    .as_deref()
+                    .map(|a| format!(", asked {}", clean_text(a)))
+                    .unwrap_or_default();
+                let link = p
+                    .comment_path
+                    .as_deref()
+                    .map(|path| format!(": {}", sanitize(&format!("{base}{path}"))))
+                    .unwrap_or_default();
+                let you = if p.can_approve == Some(true) {
+                    " (you can approve)"
+                } else {
+                    ""
+                };
+                out.push_str(&format!("\n  - {title}{asked}{link}{you}"));
+            }
+            if let Some(more) = c.pending_approvals_more.filter(|m| *m > 0) {
+                out.push_str(&format!("\n  - and {more} more"));
+            }
+        }
+        if c.has_disallowed_shared_account() {
+            out.push_str(&format!(
+                "\n\n{name} [{}] has a shared account, but the connector no longer allows \
+                 shared accounts, so nobody uses it. Connect a personal account, or have a \
+                 workspace admin allow shared accounts in the app (workspace settings > \
+                 Integrations).",
+                sanitize(&c.id)
+            ));
+        }
+    }
+    out
 }
 
 /// The result of binding a connector: the new connection and, for a role owner,
@@ -1292,6 +1637,9 @@ pub fn connection_bound(data: &Value, output: OutputFormat) -> Result<()> {
             println!(
                 "Nobody can use it until an account is connected: run `nestr connectors connections link {id}` and give the link to a person to open."
             );
+            if let Some(reach) = data.get("reach").and_then(shared_reach_sentence) {
+                println!("{reach}");
+            }
         }
     }
     Ok(())
@@ -1306,6 +1654,10 @@ pub fn connect_link(data: &Value, output: OutputFormat) -> Result<()> {
             eprintln!(
                 "Give this link to a person to open. They sign in or enter the key there, so the secret never passes through the CLI."
             );
+            // To stderr, like the line above, so stdout stays the bare URL.
+            if let Some(reach) = data.get("reach").and_then(shared_reach_sentence) {
+                eprintln!("Tell them first: {reach}");
+            }
         }
     }
     Ok(())

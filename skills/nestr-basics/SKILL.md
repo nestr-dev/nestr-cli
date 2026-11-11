@@ -46,6 +46,30 @@ nestr workspaces use <id>                # switch the active workspace, then sea
 
 (Or scope a single search to another workspace with the global `-w <id>` flag.)
 
+### Deleted items
+
+Deleted nests stay findable, but a search leaves them out unless you ask:
+
+```bash
+nestr search "deleted:true label:project"                       # only deleted items, any date
+nestr search "deleted:past_30_days"                             # deleted in a window (also this_month, last_month, …)
+nestr search "deleted:2026-10-10..2026-11-09 label:project"     # deleted between two days, both included
+nestr search "deleted:2026-10-10.. sort:deletedAt sort-order:desc"   # since that day, newest first
+nestr search "include-deleted:all quarterly review"             # live AND deleted, in one list
+```
+
+- Each deleted row shows a **DELETED** column with when it was deleted (`deletedAt`
+  in `-o json`). Read dates off the rows; `updatedAt` moves on any later write.
+- A bare date is **one day**: `deleted:2026-10-10` is that day only. Use
+  `2026-10-10..` for "since". `_` works as the separator too (`2026-10-10_2026-11-09`).
+- `deleted:true` means *only* deleted items, not "live plus deleted"; that is
+  `include-deleted:`.
+- If the search can't read a `deleted:` value it falls back to **live** items and says
+  so in a `warning:` on stderr. Check stderr before you report the results as deleted
+  ones.
+- A deleted nest can't be opened by id, so the search rows are where its details are.
+  Restoring happens in the Nestr app, from the banner on the item's page.
+
 ## Capture & plan
 
 ```bash
@@ -84,6 +108,13 @@ nestr nests create --title "Pre-launch checklist" --parent <projectId> --label c
 - `--purpose` is an optional one-line *why* (a project inherits its parent's if unset);
   `--description` is the body. Never put body text in `--purpose`.
 - `--parent <id>` makes the new nest a child/subtask — this is how you build the tree.
+- `--completed` creates it already done, for work that is finished before it is
+  recorded. It is for a task, tension or meeting; a project is done through its status
+  field (`--field project.status=Done`), not `--completed`.
+
+```bash
+nestr nests create --title "Renewed the domain" --parent <projectId> --completed   # log done work
+```
 
 ```bash
 nestr nests update <id> --completed true                # tick it off
@@ -133,8 +164,13 @@ markdown reference (`markdown` in `-o json`) in the description where the image 
 `read` only prints text types; anything else needs `--save` (it won't overwrite an
 existing file without `--force`). `-o json` returns the file with its bytes in
 `dataBase64`. Images pasted into a nest's text are not in `list`, but their ids (from
-the `/file/download?id=…` reference in the content) work with `read`. Uploads over the
-server's limit (10 MB by default) are rejected.
+the `/file/download?id=…` reference in the content) work with `read`.
+
+`upload` streams the file's raw bytes to a single-use upload URL that the server issues
+for this one file (no base64, and the API key does not go along). A file over the
+server's limit (10 MB by default) is refused before anything is sent, with the limit in
+the error. An empty file is refused too. If the server refuses the URL itself (used,
+expired, or the nest gone), run the command again; each run asks for a fresh URL.
 
 ## Discuss & post updates
 

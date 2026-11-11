@@ -121,7 +121,7 @@ Six `SKILL.md` files under [`skills/`](skills/README.md) document the CLI for ag
 - **`nestr-basics`** — the everyday loop (search, nests, inbox, plan, comments).
 - **`nestr-governance`** — tensions: propose, review changes, consent, vote.
 - **`nestr-org`** — workspaces, circles, roles, users, groups.
-- **`nestr-insights`** — graph links, insights/metrics, and JSON export.
+- **`nestr-insights`** — graph links, insights/metrics, dataseries points, and JSON export.
 - **`nestr-webhooks`** — workspace event subscriptions.
 - **`nestr-agents`** — agents, their mode and cadence, and connectors.
 

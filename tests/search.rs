@@ -45,3 +45,28 @@ async fn nest_scoped_search_hits_nest_path() {
         .unwrap();
     assert_eq!(data, serde_json::json!([]));
 }
+
+fn rows(v: serde_json::Value) -> Vec<nestr_cli::views::CompactNest> {
+    serde_json::from_value(v).unwrap()
+}
+
+// A `deleted:` search answers "when", not just "which": each deleted row carries
+// deletedAt, and the table shows it.
+#[test]
+fn deleted_rows_show_when_they_were_deleted() {
+    let out = nestr_cli::render::nest_table(&rows(serde_json::json!([
+        {"_id":"n1","title":"Old project","deleted":true,"deletedAt":"2026-10-12T08:30:00.000Z"},
+        {"_id":"n2","title":"Older project","deleted":true,"deletedAt":"2026-10-03T16:00:00.000Z"}
+    ])));
+    assert!(out.contains("DELETED"), "{out}");
+    assert!(out.contains("2026-10-12T08:30:00.000Z"), "{out}");
+    assert!(out.contains("2026-10-03T16:00:00.000Z"), "{out}");
+}
+
+#[test]
+fn live_rows_keep_the_usual_columns() {
+    let out = nestr_cli::render::nest_table(&rows(serde_json::json!([
+        {"_id":"n1","title":"Live project"}
+    ])));
+    assert!(!out.contains("DELETED"), "{out}");
+}

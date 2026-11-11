@@ -261,7 +261,12 @@ impl NestrClient {
         body: Option<&Value>,
     ) -> Result<T> {
         let text = self.request_text(method, path, query, body).await?;
-        let json = if text.trim().is_empty() { "{}" } else { &text };
+        Ok(serde_json::from_value(self.parse_with_notices(&text)?)?)
+    }
+
+    /// Parse a checked body as JSON and collect (and maybe print) its notices.
+    fn parse_with_notices(&self, text: &str) -> Result<Value> {
+        let json = if text.trim().is_empty() { "{}" } else { text };
         let value: Value = serde_json::from_str(json)?;
         if let Some(n) = notices::extract(&value) {
             if let Some(output) = self.print_notices {
@@ -271,7 +276,64 @@ impl NestrClient {
                 all.push(n);
             }
         }
-        Ok(serde_json::from_value(value)?)
+        Ok(value)
+    }
+
+    /// POST raw bytes to an absolute URL the API handed out (a single-use upload URL).
+    ///
+    /// The URL is the credential, so no bearer goes along, and the URL never shows up
+    /// in an error: reqwest's error text includes it, so it is stripped. The URL must
+    /// be https (or http to loopback), like the API host itself. `len` is sent as the
+    /// Content-Length, so the server can refuse an oversize body before reading it.
+    pub async fn post_raw_to_url(
+        &self,
+        url: &str,
+        body: reqwest::Body,
+        len: u64,
+        content_type: &str,
+    ) -> Result<Value> {
+        crate::validation::require_secure_credential_url(url).map_err(|_| {
+            NestrError::Validation(
+                "the server handed out an upload URL that is not https, so the file would \
+                 travel unencrypted; refusing to send it"
+                    .into(),
+            )
+        })?;
+        let content_type = header::HeaderValue::from_str(content_type).map_err(|_| {
+            NestrError::Validation(format!("'{content_type}' is not a valid content type"))
+        })?;
+        let resp = self
+            .inner
+            .post(url)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, len)
+            // A slow link should not cut a large upload at the client's 60 s default.
+            .timeout(Duration::from_secs(10 * 60))
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| NestrError::Http(e.without_url()))?;
+        let status = resp.status();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| NestrError::Http(e.without_url()));
+        if status.is_success() {
+            return self.parse_with_notices(&body?);
+        }
+        let body = body.unwrap_or_default();
+        // Only a JSON detail is shown: a body without one may be a proxy's HTML page.
+        let detail = extract_error_detail(&body);
+        let has_detail = detail.is_some();
+        let msg = detail.unwrap_or_else(|| format!("HTTP {} with no details.", status.as_u16()));
+        Err(match status {
+            // No credential of the user's went along, so this is not their login failing.
+            StatusCode::UNAUTHORIZED => NestrError::Api {
+                status: 401,
+                message: format!("the upload URL was not accepted: {msg}"),
+            },
+            _ => self.status_error(status, &body, msg, has_detail),
+        })
     }
 
     /// DELETE returning the raw checked body (no JSON parse) — for routes that
@@ -305,27 +367,51 @@ impl NestrClient {
         if status.is_success() {
             return Ok(resp.text().await?);
         }
-        let code = status.as_u16();
         let body = resp.text().await.unwrap_or_default();
         let detail = extract_error_detail(&body);
+        let has_detail = detail.is_some();
         let msg = detail.unwrap_or_else(|| body.clone());
+        Err(self.status_error(status, &body, msg, has_detail))
+    }
+
+    /// Map a non-success status to its error, with `msg` as the detail shown.
+    /// `has_detail` says whether the body carried a JSON reason.
+    fn status_error(
+        &self,
+        status: StatusCode,
+        body: &str,
+        msg: String,
+        has_detail: bool,
+    ) -> NestrError {
+        let code = status.as_u16();
         if status == StatusCode::FORBIDDEN {
-            if let Some(e) = read_only_key_error(&body).or_else(|| user_scope_error(&msg)) {
-                return Err(e);
+            if let Some(e) = read_only_key_error(body).or_else(|| user_scope_error(&msg)) {
+                return e;
+            }
+            // A refusal thrown inside the server (a write guard's) answers 403 with the
+            // framework's plain-text body, "Server error." in production. Passing that on
+            // makes a refusal read as a fault.
+            if !has_detail {
+                return NestrError::Permission(
+                    "Nestr refused this request without saying why. Usually this login \
+                     doesn't have the rights for it; check that you can do the same in the \
+                     app."
+                        .into(),
+                );
             }
         }
         match status {
-            StatusCode::UNAUTHORIZED => Err(session_rejected(self.refresh.is_some(), &msg)),
-            StatusCode::FORBIDDEN => Err(NestrError::Permission(msg)),
-            StatusCode::NOT_FOUND => Err(NestrError::NotFound(msg)),
-            StatusCode::PAYMENT_REQUIRED => Err(NestrError::PlanRequired(msg)),
+            StatusCode::UNAUTHORIZED => session_rejected(self.refresh.is_some(), &msg),
+            StatusCode::FORBIDDEN => NestrError::Permission(msg),
+            StatusCode::NOT_FOUND => NestrError::NotFound(msg),
+            StatusCode::PAYMENT_REQUIRED => NestrError::PlanRequired(msg),
             StatusCode::UNPROCESSABLE_ENTITY | StatusCode::BAD_REQUEST => {
-                Err(NestrError::Validation(msg))
+                NestrError::Validation(msg)
             }
-            _ => Err(NestrError::Api {
+            _ => NestrError::Api {
                 status: code,
                 message: msg,
-            }),
+            },
         }
     }
 }
