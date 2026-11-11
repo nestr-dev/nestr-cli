@@ -7,10 +7,10 @@
 # NESTR_API_KEY etc. are honoured as usual) and prints PASS or FAIL per command.
 # NESTR_READ_ONLY=1 is forced, so a write can't slip through.
 #
-# A command that needs a newer server than the one you point at passes when the CLI
-# refuses it cleanly ("needs a newer Nestr server"), and so does a clean refusal
-# from the server (Pro plan, the Insights app off, admin-only). A raw parse error,
-# a printed web page, a panic or any other failure is a FAIL. Exits 1 on any FAIL.
+# Each command lists the clean refusals it may meet: "needs a newer Nestr server" for a
+# feature the server lacks, and the server's own refusals (Pro plan, the Insights app
+# off, admin-only) where they apply. A raw parse error, a printed web page, a panic or
+# any other failure is a FAIL. Exits 1 on any FAIL.
 set -uo pipefail
 
 bin="${1:-}"
@@ -35,12 +35,13 @@ trap 'rm -f "$out_file"' EXIT
 
 # Signs of a broken reply, whatever the exit code.
 broken='expected value at line|panicked|<!DOCTYPE|<html|unexpected non-JSON'
-# Clean refusals that count as expected for a server-gated command.
-clean='needs a newer Nestr server|plan required|Insights app is not enabled|permission denied'
+# Clean refusals, per kind of command.
+newer='needs a newer Nestr server'
+insights='plan required|Insights app is not enabled'
 
-# run <gated|plain> <label> <args...>
+# run <allowed-refusals-regex or -> <label> <args...>
 run() {
-  local kind="$1" label="$2"
+  local allowed="$1" label="$2"
   shift 2
   "$bin" "$@" >"$out_file" 2>&1
   local code=$?
@@ -51,7 +52,7 @@ run() {
     fails=$((fails + 1))
   elif [[ $code -eq 0 ]]; then
     echo "PASS  $label"
-  elif [[ "$kind" == gated ]] && grep -Eq "$clean" "$out_file"; then
+  elif [[ "$allowed" != - ]] && grep -Eq "$allowed" "$out_file"; then
     echo "PASS  $label  (refused cleanly: $first)"
   else
     echo "FAIL  $label  (exit $code: $first)"
@@ -61,21 +62,21 @@ run() {
 
 echo "nestr: $("$bin" --version 2>&1)"
 
-run plain "auth status" auth status
-run plain "me" me
-run plain "search" search "a" --limit 3
-run plain "inbox list" inbox list
-run plain "labels list" labels list
-run plain "agents list" agents list
-run gated "insights list" insights list
-run gated "insights list --to $recent" insights list --to "$recent"
-run gated "insights list --to 2025-01-01" insights list --to 2025-01-01
-run gated "insights list --user me" insights list --user me
-run gated "insights compare tactical_completed" insights compare tactical_completed
+run - "auth status" auth status
+run - "me" me
+run - "search" search "a" --limit 3
+run - "inbox list" inbox list
+run - "labels list" labels list
+run - "agents list" agents list
+run "$insights" "insights list" insights list
+run "$insights" "insights list --to $recent" insights list --to "$recent"
+run "$newer|$insights" "insights list --to 2025-01-01" insights list --to 2025-01-01
+run "$insights" "insights list --user me" insights list --user me
+run "$newer|$insights" "insights compare tactical_completed" insights compare tactical_completed
 
 me_id="$("$bin" -o json me 2>/dev/null | grep -o '"_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')"
 if [[ -n "$me_id" ]]; then
-  run gated "users labels activity <me>" users labels activity "$me_id" --limit 5
+  run "$newer|permission denied" "users labels activity <me>" users labels activity "$me_id" --limit 5
 else
   echo "FAIL  users labels activity  (could not read your user id from \`nestr -o json me\`)"
   fails=$((fails + 1))
