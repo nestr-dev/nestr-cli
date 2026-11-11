@@ -23,6 +23,29 @@ pub enum NestrError {
     AnchorNotFound(String),
     #[error("API error ({status}): {message}")]
     Api { status: u16, message: String },
+    /// The server has no such route: an older Nestr answers an unknown GET with its
+    /// web page and an unknown write with an empty 405. `reply` says which.
+    #[error(
+        "This Nestr server doesn't support `{method} {path}` yet (it answered with {reply}). \
+         This feature needs a newer Nestr server."
+    )]
+    Unsupported {
+        method: String,
+        path: String,
+        reply: &'static str,
+    },
+    /// The server answered without honouring an option the user passed, so its
+    /// numbers don't match the request and are not shown.
+    #[error("{0}")]
+    Ignored(String),
+    /// A reply that should have been JSON and wasn't. `snippet` is already cleaned
+    /// for the terminal and cut short, with its leading ": " (empty when none).
+    #[error("unexpected non-JSON reply (HTTP {status}, {content_type}){snippet}")]
+    NonJson {
+        status: u16,
+        content_type: String,
+        snippet: String,
+    },
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
@@ -45,6 +68,51 @@ pub fn extract_error_detail(body: &str) -> Option<String> {
     non_empty(&v["message"])
         .or_else(|| non_empty(&v["description"]))
         .or_else(|| non_empty(&v["error"]))
+}
+
+/// What [`NestrError::Unsupported`] says the server answered with.
+pub const REPLY_WEB_PAGE: &str = "its web page";
+pub const REPLY_EMPTY_405: &str = "HTTP 405 and an empty body";
+
+/// Whether a reply is a web page: an HTML content type, or a body that opens with a tag.
+pub fn is_web_page(content_type: Option<&str>, body: &str) -> bool {
+    content_type.is_some_and(|c| c.to_ascii_lowercase().contains("text/html"))
+        || body.trim_start().starts_with('<')
+}
+
+/// A short, terminal-safe, single-line excerpt of a body for an error message.
+/// Web pages are never excerpted.
+pub fn body_snippet(content_type: Option<&str>, body: &str) -> String {
+    if is_web_page(content_type, body) {
+        return String::new();
+    }
+    let clean = body_excerpt(body);
+    if clean.is_empty() {
+        return clean;
+    }
+    format!(": {clean}")
+}
+
+/// A body cleaned for the terminal, on one line and cut to 120 characters.
+pub fn body_excerpt(body: &str) -> String {
+    const MAX: usize = 120;
+    let clean = crate::render::sanitize(body)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    match clean.char_indices().nth(MAX) {
+        Some((cut, _)) => format!("{}…", &clean[..cut]),
+        None => clean,
+    }
+}
+
+/// The error for a reply that should have been JSON and wasn't.
+pub fn non_json(status: u16, content_type: Option<&str>, body: &str) -> NestrError {
+    NestrError::NonJson {
+        status,
+        content_type: content_type.unwrap_or("no content type").to_string(),
+        snippet: body_snippet(content_type, body),
+    }
 }
 
 #[cfg(test)]

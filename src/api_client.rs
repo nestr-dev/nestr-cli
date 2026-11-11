@@ -8,7 +8,10 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 
 use crate::config::OutputFormat;
-use crate::error::{extract_error_detail, NestrError, Result};
+use crate::error::{
+    body_excerpt, extract_error_detail, is_web_page, non_json, NestrError, Result, REPLY_EMPTY_405,
+    REPLY_WEB_PAGE,
+};
 use crate::notices;
 use crate::oauth::ReactiveRefresh;
 
@@ -108,6 +111,20 @@ fn validate_path(path: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A checked reply: its status, content type and body text.
+struct Reply {
+    status: u16,
+    content_type: Option<String>,
+    body: String,
+}
+
+fn content_type_of(resp: &reqwest::Response) -> Option<String> {
+    resp.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
 }
 
 /// Thin reqwest wrapper. The bearer lives in a shared cell so a reactive refresh
@@ -221,14 +238,14 @@ impl NestrClient {
         self.request(Method::DELETE, path, &[], Some(body)).await
     }
 
-    /// Send a request (with one 401-refresh-retry) and return the raw checked body.
+    /// Send a request (with one 401-refresh-retry) and return the checked reply.
     async fn request_text(
         &self,
         method: Method,
         path: &str,
         query: &[(&str, &str)],
         body: Option<&Value>,
-    ) -> Result<String> {
+    ) -> Result<Reply> {
         validate_path(path)?;
         let url = format!("{}{path}", self.api_base);
         // The bearer this request goes out with, so a 401 names the token that
@@ -250,7 +267,7 @@ impl NestrClient {
             }
             _ => resp,
         };
-        self.checked_text(resp).await
+        self.checked_text(resp, &method, path).await
     }
 
     async fn request<T: DeserializeOwned>(
@@ -260,14 +277,18 @@ impl NestrClient {
         query: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<T> {
-        let text = self.request_text(method, path, query, body).await?;
-        Ok(serde_json::from_value(self.parse_with_notices(&text)?)?)
+        let reply = self.request_text(method, path, query, body).await?;
+        let value = self.parse_with_notices(&reply)?;
+        Ok(serde_json::from_value(value)?)
     }
 
     /// Parse a checked body as JSON and collect (and maybe print) its notices.
-    fn parse_with_notices(&self, text: &str) -> Result<Value> {
+    /// A body that isn't JSON is an error naming the status and content type.
+    fn parse_with_notices(&self, reply: &Reply) -> Result<Value> {
+        let text = reply.body.as_str();
         let json = if text.trim().is_empty() { "{}" } else { text };
-        let value: Value = serde_json::from_str(json)?;
+        let value: Value = serde_json::from_str(json)
+            .map_err(|_| non_json(reply.status, reply.content_type.as_deref(), text))?;
         if let Some(n) = notices::extract(&value) {
             if let Some(output) = self.print_notices {
                 notices::emit(&n, output);
@@ -314,12 +335,22 @@ impl NestrClient {
             .await
             .map_err(|e| NestrError::Http(e.without_url()))?;
         let status = resp.status();
+        let content_type = content_type_of(&resp);
         let body = resp
             .text()
             .await
             .map_err(|e| NestrError::Http(e.without_url()));
         if status.is_success() {
-            return self.parse_with_notices(&body?);
+            // No route goes in the error: the URL is the credential.
+            let reply = Reply {
+                status: status.as_u16(),
+                content_type,
+                body: body?,
+            };
+            if is_web_page(reply.content_type.as_deref(), &reply.body) {
+                return Err(non_json(reply.status, reply.content_type.as_deref(), ""));
+            }
+            return self.parse_with_notices(&reply);
         }
         let body = body.unwrap_or_default();
         // Only a JSON detail is shown: a body without one may be a proxy's HTML page.
@@ -339,7 +370,10 @@ impl NestrClient {
     /// DELETE returning the raw checked body (no JSON parse) — for routes that
     /// respond with a bare string like `"success"`.
     pub async fn delete_text(&self, path: &str) -> Result<String> {
-        self.request_text(Method::DELETE, path, &[], None).await
+        Ok(self
+            .request_text(Method::DELETE, path, &[], None)
+            .await?
+            .body)
     }
 
     async fn send(
@@ -361,16 +395,60 @@ impl NestrClient {
         Ok(rb.send().await?)
     }
 
-    /// Validate status and return the body text, mapping Nestr's status codes.
-    async fn checked_text(&self, resp: reqwest::Response) -> Result<String> {
+    /// Validate status and return the reply, mapping Nestr's status codes.
+    ///
+    /// An older Nestr answers a route it doesn't have with its web page (GET, on
+    /// 200) or with an empty 405 (writes). Both become [`NestrError::Unsupported`],
+    /// so the page is never parsed or printed. A web page on any other status (a
+    /// gateway's 502, say) is a non-JSON reply, not a missing route.
+    async fn checked_text(
+        &self,
+        resp: reqwest::Response,
+        method: &Method,
+        path: &str,
+    ) -> Result<Reply> {
         let status = resp.status();
-        if status.is_success() {
-            return Ok(resp.text().await?);
+        let content_type = content_type_of(&resp);
+        let body = if status.is_success() {
+            resp.text().await?
+        } else {
+            resp.text().await.unwrap_or_default()
+        };
+        let web_page = is_web_page(content_type.as_deref(), &body);
+        let unsupported = |reply| NestrError::Unsupported {
+            method: method.to_string(),
+            path: path.to_string(),
+            reply,
+        };
+        if web_page
+            && (status.is_success()
+                || matches!(
+                    status,
+                    StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+                ))
+        {
+            return Err(unsupported(REPLY_WEB_PAGE));
         }
-        let body = resp.text().await.unwrap_or_default();
+        if status == StatusCode::METHOD_NOT_ALLOWED && body.trim().is_empty() {
+            return Err(unsupported(REPLY_EMPTY_405));
+        }
+        if status.is_success() {
+            return Ok(Reply {
+                status: status.as_u16(),
+                content_type,
+                body,
+            });
+        }
         let detail = extract_error_detail(&body);
         let has_detail = detail.is_some();
-        let msg = detail.unwrap_or_else(|| body.clone());
+        if web_page && !matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            return Err(non_json(status.as_u16(), content_type.as_deref(), &body));
+        }
+        let msg = match detail {
+            Some(d) => d,
+            None if web_page => format!("HTTP {} with a web page", status.as_u16()),
+            None => body_excerpt(&body),
+        };
         Err(self.status_error(status, &body, msg, has_detail))
     }
 
