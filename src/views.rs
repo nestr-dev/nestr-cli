@@ -2,8 +2,17 @@
 //! Nestr's polymorphic payloads (unknown fields ignored, missing fields default).
 //! NEVER used for `-o json` output — that path prints the raw `Value`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+
+/// A null value reads as the default, as a missing key does, so one null row cannot empty a list.
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
 
 /// The compact field set the CLI renders for any Nest-shaped object
 /// (search hits, children, projects, inbox items, daily-plan items).
@@ -89,6 +98,37 @@ pub struct LabelView {
     pub color: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    #[serde(default, rename = "applicableTo", deserialize_with = "null_as_default")]
+    pub applicable_to: Vec<String>,
+    /// Colour and icon as a single-label read (and an edit) returns them.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub display: LabelDisplay,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LabelDisplay {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+impl LabelView {
+    /// The colour to show: top-level when present, else the read's `display.color`.
+    pub fn shown_color(&self) -> &str {
+        self.color
+            .as_deref()
+            .or(self.display.color.as_deref())
+            .unwrap_or("")
+    }
+
+    /// The icon to show: top-level when present, else the read's `display.icon`.
+    pub fn shown_icon(&self) -> &str {
+        self.icon
+            .as_deref()
+            .or(self.display.icon.as_deref())
+            .unwrap_or("")
+    }
 }
 
 /// Extract display titles from an `accountabilities`/`domains` array, whose items
@@ -166,6 +206,10 @@ pub struct UserView {
     pub profile: Option<UserProfile>,
     #[serde(default)]
     pub bot: Option<bool>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub labels: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 impl UserView {

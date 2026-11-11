@@ -36,6 +36,12 @@ pub enum NestrError {
 pub fn extract_error_detail(body: &str) -> Option<String> {
     let v: Value = serde_json::from_str(body).ok()?;
     let non_empty = |val: &Value| val.as_str().filter(|s| !s.is_empty()).map(String::from);
+    // Keep a machine code (`"error": "not-member"`) next to its message.
+    if let (Some(m), Some(c)) = (non_empty(&v["message"]), non_empty(&v["error"])) {
+        if !c.contains(' ') && c != m {
+            return Some(format!("{m} [{c}]"));
+        }
+    }
     non_empty(&v["message"])
         .or_else(|| non_empty(&v["description"]))
         .or_else(|| non_empty(&v["error"]))
@@ -52,6 +58,15 @@ mod tests {
         assert_eq!(
             extract_error_detail(body),
             Some("Pro plan required".to_string())
+        );
+    }
+
+    #[test]
+    fn keeps_error_code_beside_message() {
+        let body = r#"{"status":"error","error":"not-member","message":"Not a member"}"#;
+        assert_eq!(
+            extract_error_detail(body),
+            Some("Not a member [not-member]".to_string())
         );
     }
 

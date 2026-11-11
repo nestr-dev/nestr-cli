@@ -21,3 +21,15 @@ async fn fetch_me_returns_user_object() {
     assert_eq!(me["username"], "a@b.c");
     assert_eq!(me["profile"]["fullName"], "A B");
 }
+
+#[test]
+fn user_labels_line_lists_labels_for_the_workspace() {
+    use nestr_cli::commands::me::user_labels_line;
+    let me = serde_json::json!({"userLabels":{"ws1":{"labels":["legal_rep","skill_coding"],"fields":{}}}});
+    assert_eq!(
+        user_labels_line(&me, "ws1").as_deref(),
+        Some("labels: legal_rep, skill_coding")
+    );
+    assert_eq!(user_labels_line(&me, "ws2"), None);
+    assert_eq!(user_labels_line(&serde_json::json!({}), "ws1"), None);
+}

@@ -31,7 +31,7 @@ use nestr_cli::config::OutputFormat;
   \x1b[1mnotifications\x1b[0m  List and clear notifications
   \x1b[1mdm\x1b[0m         Direct messages: list, read, post, close
   \x1b[1mqueues\x1b[0m     Support queues and their threads
-  \x1b[1mlabels\x1b[0m     List labels; manage personal labels
+  \x1b[1mlabels\x1b[0m     List and manage labels (nests and people)
   \x1b[1mprojects\x1b[0m   List workspace projects
   \x1b[1mwork\x1b[0m       Show open projects and todos
 

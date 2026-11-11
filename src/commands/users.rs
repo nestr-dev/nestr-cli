@@ -17,6 +17,9 @@ pub enum UsersCmd {
         search: Option<String>,
         #[arg(long)]
         include_suspended: bool,
+        /// Only members carrying this label (short id, e.g. legal_rep).
+        #[arg(long, value_name = "LABEL_ID")]
+        label: Option<String>,
     },
     /// Get a user by id.
     Get { id: String },
@@ -44,6 +47,40 @@ pub enum UsersCmd {
     Groups {
         #[command(subcommand)]
         cmd: UserGroupsCmd,
+    },
+    /// Put labels on people and set their user fields.
+    Labels {
+        #[command(subcommand)]
+        cmd: UserLabelsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum UserLabelsCmd {
+    /// Put a label on a member (admin by default), optionally with field values.
+    Add {
+        user_id: String,
+        label_id: String,
+        /// Field value as CODE=VALUE (repeatable), e.g. --field url=https://example.com/r/1.
+        /// CODE may be a field code, id or label.code. VALUE is parsed as JSON when valid.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+    },
+    /// Take a label off a member. The values are kept, hidden.
+    Remove { user_id: String, label_id: String },
+    /// Set field values on a label the member holds. `--field code=` clears a value.
+    Set {
+        user_id: String,
+        label_id: String,
+        #[arg(long = "field", required = true)]
+        fields: Vec<String>,
+    },
+    /// Audit trail of label changes on a member (workspace admins), newest first.
+    Activity {
+        user_id: String,
+        /// Max entries (server default 50, max 100).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: Option<u32>,
     },
 }
 
@@ -139,6 +176,138 @@ pub async fn set_user_groups(
     Ok(data)
 }
 
+fn user_label_path(ws: &str, user_id: &str, label_id: &str) -> String {
+    format!("/workspaces/{ws}/users/{user_id}/labels/{label_id}")
+}
+
+/// Body for add/set: `{"fields": {...}}`, or None when no fields were given.
+pub fn fields_body(fields: &Map<String, Value>) -> Option<Value> {
+    (!fields.is_empty()).then(|| serde_json::json!({ "fields": fields }))
+}
+
+pub async fn add_user_label(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+    label_id: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .post(&user_label_path(ws, user_id, label_id), body)
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+pub async fn set_user_label_fields(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+    label_id: &str,
+    body: &Value,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .patch(&user_label_path(ws, user_id, label_id), body)
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+pub async fn remove_user_label(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+    label_id: &str,
+) -> crate::error::Result<Value> {
+    let raw: Value = client
+        .delete(&user_label_path(ws, user_id, label_id))
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+pub async fn fetch_label_activity(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+    limit: Option<u32>,
+) -> crate::error::Result<Value> {
+    let limit = limit.map(|n| n.to_string());
+    let mut params: Vec<(&str, &str)> = Vec::new();
+    if let Some(l) = &limit {
+        params.push(("limit", l));
+    }
+    let raw: Value = client
+        .get(
+            &format!("/workspaces/{ws}/users/{user_id}/labels/activity"),
+            &params,
+        )
+        .await?;
+    Ok(unwrap_data(raw).0)
+}
+
+fn render_fields(fields: &Map<String, Value>) {
+    for (k, v) in fields {
+        let shown = match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        println!(
+            "  {} = {}",
+            render::clean_text(k),
+            render::clean_text(&shown)
+        );
+    }
+}
+
+fn render_label_change(data: &Value, verb: &str, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let s = |k: &str| data.get(k).and_then(Value::as_str).unwrap_or("-");
+            let state = if data["changed"].as_bool() == Some(false) {
+                "no change"
+            } else {
+                verb
+            };
+            println!(
+                "{} label {} on user {}",
+                state,
+                render::clean_text(s("label")),
+                render::clean_text(s("userId"))
+            );
+            if let Some(f) = data["fields"].as_object() {
+                render_fields(f);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_label_activity(data: &Value, output: OutputFormat) -> Result<()> {
+    match output {
+        OutputFormat::Json => print_json(data)?,
+        OutputFormat::Text => {
+            let rows: Vec<Vec<String>> = data
+                .as_array()
+                .map(|a| a.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .map(|e| {
+                    let s = |k: &str| e.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                    vec![s("date"), s("verb"), s("label"), s("actor")]
+                })
+                .collect();
+            if rows.is_empty() {
+                render::print_no_results("No label activity.");
+            } else {
+                println!(
+                    "{}",
+                    render::format_table(&["DATE", "VERB", "LABEL", "ACTOR"], rows)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn render_users(data: &Value, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
@@ -148,6 +317,10 @@ fn render_users(data: &Value, output: OutputFormat) -> Result<()> {
                 render::print_no_results("No users.");
             } else {
                 println!("{}", render::user_table(&users));
+                // Field values are per user; show them under a single-user view.
+                if let [u] = users.as_slice() {
+                    render_fields(&u.fields);
+                }
             }
         }
     }
@@ -178,6 +351,7 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
         UsersCmd::List {
             search,
             include_suspended,
+            label,
         } => {
             let mut params: Vec<(&str, &str)> = Vec::new();
             if let Some(s) = &search {
@@ -185,6 +359,9 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
             }
             if include_suspended {
                 params.push(("includeSuspended", "true"));
+            }
+            if let Some(l) = &label {
+                params.push(("label", l));
             }
             let (data, _) = fetch_list(&client, &ws, &params).await?;
             render_users(&data, cfg.output)?;
@@ -242,6 +419,43 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
             let (data, meta) = fetch_user_roles(&client, &ws, &id, &[]).await?;
             render::output_roles(&data, meta.as_ref(), cfg.output, false)?;
         }
+        UsersCmd::Labels { cmd } => match cmd {
+            UserLabelsCmd::Add {
+                user_id,
+                label_id,
+                fields,
+            } => {
+                safety::enforce_read_only(g.read_only, "users labels add")?;
+                let parsed = super::nests::parse_field_args(&fields)?;
+                let body = fields_body(&parsed).unwrap_or_else(|| serde_json::json!({}));
+                let data = add_user_label(&client, &ws, &user_id, &label_id, &body).await?;
+                render_label_change(&data, "added", cfg.output)?;
+            }
+            UserLabelsCmd::Remove { user_id, label_id } => {
+                safety::enforce_read_only(g.read_only, "users labels remove")?;
+                safety::confirm_destructive(
+                    &format!("Remove label '{label_id}' from user '{user_id}'?"),
+                    g.yes,
+                )?;
+                let data = remove_user_label(&client, &ws, &user_id, &label_id).await?;
+                render_label_change(&data, "removed", cfg.output)?;
+            }
+            UserLabelsCmd::Set {
+                user_id,
+                label_id,
+                fields,
+            } => {
+                safety::enforce_read_only(g.read_only, "users labels set")?;
+                let parsed = super::nests::parse_field_args(&fields)?;
+                let body = fields_body(&parsed).unwrap_or_default();
+                let data = set_user_label_fields(&client, &ws, &user_id, &label_id, &body).await?;
+                render_label_change(&data, "updated", cfg.output)?;
+            }
+            UserLabelsCmd::Activity { user_id, limit } => {
+                let data = fetch_label_activity(&client, &ws, &user_id, limit).await?;
+                render_label_activity(&data, cfg.output)?;
+            }
+        },
         UsersCmd::Groups { cmd } => match cmd {
             UserGroupsCmd::Show { id } => {
                 let data = fetch_user_groups(&client, &ws, &id).await?;

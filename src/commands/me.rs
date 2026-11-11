@@ -13,6 +13,16 @@ pub async fn fetch_me(client: &NestrClient) -> crate::error::Result<Value> {
     Ok(data)
 }
 
+/// One line of the caller's user labels in `ws`, or None when there are none.
+pub fn user_labels_line(me: &Value, ws: &str) -> Option<String> {
+    let labels: Vec<&str> = me["userLabels"][ws]["labels"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    (!labels.is_empty()).then(|| format!("labels: {}", labels.join(", ")))
+}
+
 /// `nestr me` — resolve the active profile, fetch identity, render.
 pub async fn run(g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
@@ -36,6 +46,9 @@ pub async fn run(g: &GlobalArgs) -> Result<()> {
             &cfg.workspace_id
         };
         println!("profile: {}  workspace: {ws}", cfg.profile_name);
+        if let Some(line) = user_labels_line(v, &cfg.workspace_id) {
+            println!("{}", render::clean_text(&line));
+        }
     })?;
     Ok(())
 }
