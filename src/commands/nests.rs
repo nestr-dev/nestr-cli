@@ -278,6 +278,20 @@ impl HintOpts {
         }
         out
     }
+
+    /// The params for reading `ids`. Nestr reads hints only on a single-nest read
+    /// and drops them on `nests/a,b`, where the nests would read as having none,
+    /// so asking for hints on several ids is an error.
+    pub fn params_for(&self, ids: &str) -> anyhow::Result<Vec<(&'static str, String)>> {
+        let out = self.params();
+        if !out.is_empty() && ids.contains(',') {
+            anyhow::bail!(
+                "--hints, --hint-types and --min-severity work on a single nest id: Nestr \
+                 ignores them when reading several nests at once"
+            );
+        }
+        Ok(out)
+    }
 }
 
 /// The single-nest diagnosis params of a nest read: `provenance`, `rights`
@@ -636,7 +650,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 types: hint_types,
                 min_severity,
             }
-            .params();
+            .params_for(&ids)?;
             hint_params.extend(
                 Diagnosis {
                     provenance,

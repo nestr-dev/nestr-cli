@@ -742,3 +742,21 @@ async fn update_field_null_clears_the_links() {
     )
     .await;
 }
+
+#[test]
+fn hint_flags_are_refused_for_several_ids() {
+    // Nestr reads hints only on a single-nest read; on `nests/a,b` it drops them,
+    // so the nests would read as having none.
+    use nestr_cli::commands::nests::HintOpts;
+    let opts = HintOpts {
+        level: Some("full".into()),
+        ..Default::default()
+    };
+    let err = opts.params_for("n1,n2").unwrap_err().to_string();
+    assert!(err.contains("single nest id"), "{err}");
+    assert_eq!(
+        opts.params_for("n1").unwrap(),
+        vec![("hints", "full".to_string())]
+    );
+    assert!(HintOpts::default().params_for("n1,n2").unwrap().is_empty());
+}

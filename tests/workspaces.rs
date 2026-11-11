@@ -80,3 +80,17 @@ async fn set_app_errors_on_unknown_app() {
         .unwrap_err();
     assert!(matches!(err, nestr_cli::error::NestrError::NotFound(_)));
 }
+
+#[test]
+fn list_refuses_search_which_nestr_ignores_there() {
+    // `GET workspaces` reads no `search` on any server, so the list would be unfiltered.
+    use nestr_cli::commands::workspaces::list_params;
+    let err = list_params(Some("acme"), None, None)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ignores --search"), "{err}");
+    assert_eq!(
+        list_params(None, Some(5), Some(2)).unwrap(),
+        vec![("limit", "5".to_string()), ("page", "2".to_string())]
+    );
+}
