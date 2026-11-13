@@ -5,6 +5,7 @@ use serde_json::Value;
 use crate::api_client::{unwrap_data, NestrClient};
 use crate::commands::{resolve_client, GlobalArgs};
 use crate::config::OutputFormat;
+use crate::error::NestrError;
 use crate::render;
 
 #[derive(Subcommand)]
@@ -106,8 +107,185 @@ pub fn list_params(s: &Scope) -> Vec<(&'static str, String)> {
     }
     if let Some(t) = &s.to {
         params.push(("to", t.clone()));
+        // Older servers (before `from`/`to`) read the end of the period from
+        // `endDate`; newer ones take `to` and ignore `endDate` when both are sent.
+        params.push(("endDate", t.clone()));
     }
     params
+}
+
+/// The insights route a reply came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    List,
+    Get,
+    History,
+    Compare,
+}
+
+impl Route {
+    fn command(self) -> &'static str {
+        match self {
+            Route::List => "insights list",
+            Route::Get => "insights get",
+            Route::History => "insights history",
+            Route::Compare => "insights compare",
+        }
+    }
+}
+
+/// The options that narrow what an insights reply covers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Asked<'a> {
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    pub nest: Option<&'a str>,
+    pub user: Option<&'a str>,
+}
+
+/// Days since 1970-01-01 of an ISO 8601 date or timestamp (its `YYYY-MM-DD` part).
+pub fn parse_day(s: &str) -> Option<i64> {
+    let d = s.get(..10)?;
+    let b = d.as_bytes();
+    if b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let y: i64 = d[..4].parse().ok()?;
+    let m: i64 = d[5..7].parse().ok()?;
+    let day: i64 = d[8..10].parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+/// Today, in days since 1970-01-01 (UTC).
+pub fn today() -> i64 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    (secs / 86_400) as i64
+}
+
+/// An older server (production before the insights periods shipped) starts every
+/// list period one month before today, whatever the end, so an end this many days
+/// back or more would give a period that runs backwards.
+const OLD_SERVER_MAX_TO_AGE_DAYS: i64 = 28;
+
+fn ignored(opt: &str, route: Route, covers: &str) -> NestrError {
+    NestrError::Ignored(format!(
+        "this Nestr server ignores {opt} on `nestr {}`, so its numbers cover {covers}, not what \
+         you asked for. They were not printed. {opt} needs a newer Nestr server.",
+        route.command()
+    ))
+}
+
+/// Check that an insights reply covers what was asked, before it is shown.
+///
+/// A newer server states the period it analysed in `meta.period` (list, get,
+/// compare) and the circle or person in `meta.nestId`/`meta.userId` (history). An
+/// older one sends no `meta` and silently ignores what it doesn't know: `from` and
+/// `to` everywhere but history (list takes `endDate` instead), and history's
+/// `nestId`/`userId`. Whatever it ignored is refused here rather than shown as if it
+/// applied. `Ok(Some(note))` means the reply stands but its period reads differently
+/// from what the help says. `today` is in days since 1970-01-01.
+pub fn confirm(
+    route: Route,
+    asked: &Asked,
+    meta: Option<&Value>,
+    today: i64,
+) -> Result<Option<String>, NestrError> {
+    let period_confirmed = meta
+        .and_then(|m| m.get("period"))
+        .is_some_and(Value::is_object);
+    let echoed =
+        |key: &str, want: &str| meta.and_then(|m| m.get(key)).and_then(Value::as_str) == Some(want);
+    match route {
+        Route::History => {
+            if let Some(n) = asked.nest {
+                if !echoed("nestId", n) {
+                    return Err(ignored("--nest", route, "the whole workspace"));
+                }
+            }
+            if let Some(u) = asked.user {
+                if !echoed("userId", u) {
+                    return Err(ignored("--user", route, "everyone"));
+                }
+            }
+            Ok(None)
+        }
+        _ if period_confirmed => Ok(None),
+        Route::List => {
+            if asked.from.is_some() {
+                return Err(ignored("--from", route, "a different period"));
+            }
+            let Some(to) = asked.to else {
+                return Ok(None);
+            };
+            match parse_day(to) {
+                Some(day) if today - day < OLD_SERVER_MAX_TO_AGE_DAYS => Ok(Some(format!(
+                    "this Nestr server starts the period one month before today, not one month \
+                     before --to, so these numbers cover a month ago until {to}."
+                ))),
+                _ => Err(NestrError::Ignored(format!(
+                    "this Nestr server always starts the period one month before today, so \
+                     --to {to} would give a period that runs backwards. The numbers were not printed. \
+                     On this server use a --to within the last {OLD_SERVER_MAX_TO_AGE_DAYS} days \
+                     (as YYYY-MM-DD); an earlier one needs a newer Nestr server."
+                ))),
+            }
+        }
+        Route::Get | Route::Compare => {
+            if asked.from.is_some() {
+                return Err(ignored("--from", route, "the last month"));
+            }
+            if asked.to.is_some() {
+                return Err(ignored("--to", route, "the last month"));
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// `me` stands for the caller: resolve it to their own id, which every server
+/// accepts (only newer ones know `me`). Other ids pass through.
+async fn resolve_user(
+    client: &NestrClient,
+    user: Option<String>,
+) -> crate::error::Result<Option<String>> {
+    match user.as_deref() {
+        Some("me") => Ok(Some(crate::commands::me::my_id(client, "--user me").await?)),
+        _ => Ok(user),
+    }
+}
+
+/// A note about the period goes to stderr, as JSON under `-o json`.
+fn emit_note(note: &str, output: OutputFormat) {
+    match output {
+        OutputFormat::Json => eprintln!("{}", serde_json::json!({ "note": note })),
+        OutputFormat::Text => eprintln!("note: {note}"),
+    }
+}
+
+/// Refuse a reply that doesn't cover what was asked; print any note about it.
+fn check(
+    route: Route,
+    asked: &Asked,
+    meta: Option<&Value>,
+    output: OutputFormat,
+) -> crate::error::Result<()> {
+    if let Some(note) = confirm(route, asked, meta, today())? {
+        emit_note(&note, output);
+    }
+    Ok(())
 }
 
 fn as_pairs<'a>(params: &'a [(&'static str, String)]) -> Vec<(&'a str, &'a str)> {
@@ -147,20 +325,22 @@ pub async fn fetch_get(
     Ok((data, meta))
 }
 
+/// `GET workspaces/:id/insights/:metric/history`, with its meta (the circle and
+/// person it covers, on newer servers).
 pub async fn fetch_history(
     client: &NestrClient,
     ws: &str,
     metric: &str,
     params: &[(&str, &str)],
-) -> crate::error::Result<Value> {
+) -> crate::error::Result<(Value, Option<Value>)> {
     let raw: Value = client
         .get(
             &format!("/workspaces/{ws}/insights/{metric}/history"),
             params,
         )
         .await?;
-    let (data, _, _) = unwrap_data(raw);
-    Ok(data)
+    let (data, meta, _) = unwrap_data(raw);
+    Ok((data, meta))
 }
 
 /// `GET workspaces/:id/insights/:metric/circles`, with its meta.
@@ -208,14 +388,22 @@ pub async fn run(cmd: InsightsCmd, g: &GlobalArgs) -> Result<()> {
             from,
             to,
         } => {
+            let user = resolve_user(&client, user).await?;
+            let asked = Asked {
+                from: from.as_deref(),
+                to: to.as_deref(),
+                nest: nest.as_deref(),
+                user: user.as_deref(),
+            };
             let params = list_params(&Scope {
-                user,
-                nest,
-                from,
-                to,
+                user: user.clone(),
+                nest: nest.clone(),
+                from: from.clone(),
+                to: to.clone(),
                 include_sub_circles,
             });
             let (data, meta) = fetch_list(&client, &ws, &as_pairs(&params)).await?;
+            check(Route::List, &asked, meta.as_ref(), output)?;
             print_with_meta(&data, meta.as_ref(), output, render::insights_text)?;
         }
         InsightsCmd::Get {
@@ -223,10 +411,16 @@ pub async fn run(cmd: InsightsCmd, g: &GlobalArgs) -> Result<()> {
             from,
             to,
         } => {
+            let asked = Asked {
+                from: from.as_deref(),
+                to: to.as_deref(),
+                ..Default::default()
+            };
             let mut params = Vec::new();
-            push_opt(&mut params, "from", from);
-            push_opt(&mut params, "to", to);
+            push_opt(&mut params, "from", from.clone());
+            push_opt(&mut params, "to", to.clone());
             let (data, meta) = fetch_get(&client, &ws, &metric_id, &as_pairs(&params)).await?;
+            check(Route::Get, &asked, meta.as_ref(), output)?;
             print_with_meta(&data, meta.as_ref(), output, render::insight_detail_text)?;
         }
         InsightsCmd::History {
@@ -237,13 +431,20 @@ pub async fn run(cmd: InsightsCmd, g: &GlobalArgs) -> Result<()> {
             nest,
             user,
         } => {
+            let user = resolve_user(&client, user).await?;
+            let asked = Asked {
+                nest: nest.as_deref(),
+                user: user.as_deref(),
+                ..Default::default()
+            };
             let mut params = Vec::new();
             push_opt(&mut params, "from", from);
             push_opt(&mut params, "to", to);
             push_opt(&mut params, "limit", limit.map(|n| n.to_string()));
-            push_opt(&mut params, "nestId", nest);
-            push_opt(&mut params, "userId", user);
-            let data = fetch_history(&client, &ws, &metric_id, &as_pairs(&params)).await?;
+            push_opt(&mut params, "nestId", nest.clone());
+            push_opt(&mut params, "userId", user.clone());
+            let (data, meta) = fetch_history(&client, &ws, &metric_id, &as_pairs(&params)).await?;
+            check(Route::History, &asked, meta.as_ref(), output)?;
             render::output_history(&data, output)?;
         }
         InsightsCmd::Compare {
@@ -253,16 +454,31 @@ pub async fn run(cmd: InsightsCmd, g: &GlobalArgs) -> Result<()> {
             to,
             include_sub_circles,
         } => {
+            let asked = Asked {
+                from: from.as_deref(),
+                to: to.as_deref(),
+                ..Default::default()
+            };
             let mut params = Vec::new();
             push_opt(&mut params, "parentNestId", parent);
-            push_opt(&mut params, "from", from);
-            push_opt(&mut params, "to", to);
+            push_opt(&mut params, "from", from.clone());
+            push_opt(&mut params, "to", to.clone());
             push_opt(
                 &mut params,
                 "includeSubCircles",
                 include_sub_circles.map(|b| b.to_string()),
             );
-            let (data, meta) = fetch_compare(&client, &ws, &metric_id, &as_pairs(&params)).await?;
+            let (data, meta) = fetch_compare(&client, &ws, &metric_id, &as_pairs(&params))
+                .await
+                .map_err(|e| match e {
+                    NestrError::Unsupported { .. } => anyhow::anyhow!(
+                        "{e}\nhint: comparing circles side by side is rolling out with that \
+                         newer server. Until then, read one circle at a time with \
+                         `nestr insights list --nest <circleId>`."
+                    ),
+                    e => e.into(),
+                })?;
+            check(Route::Compare, &asked, meta.as_ref(), output)?;
             print_with_meta(&data, meta.as_ref(), output, render::compare_text)?;
         }
     }

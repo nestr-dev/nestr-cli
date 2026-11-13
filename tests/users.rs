@@ -238,3 +238,33 @@ async fn label_errors_keep_code_and_map_status() {
         .unwrap_err();
     assert!(matches!(e, nestr_cli::error::NestrError::NotFound(ref m) if m.contains("not-member")));
 }
+
+// ---- 0.5.2: `--label` on a server without user labels (production's master ignores
+// the param and returns every member) must not read as a filtered list.
+
+#[test]
+fn label_filter_is_confirmed_by_a_reply_whose_rows_carry_the_label() {
+    // Shaped like the user-labels server: every row has `labels` (short ids).
+    let data = serde_json::json!([
+        {"_id":"u1","labels":["legal_rep","skill_coding"]},
+        {"_id":"u2","labels":["legal_rep"]}
+    ]);
+    assert!(users::confirm_label_filter(&data, "legal_rep", "ws1").is_ok());
+    // The label given by its full id matches the short id on the rows.
+    assert!(users::confirm_label_filter(&data, "ws1_legal_rep", "ws1").is_ok());
+    // Nobody carries it: nothing to contradict.
+    assert!(users::confirm_label_filter(&serde_json::json!([]), "legal_rep", "ws1").is_ok());
+}
+
+#[test]
+fn label_filter_is_refused_when_the_server_ignored_it() {
+    // Shaped like master: no `labels` on any row.
+    let master = serde_json::json!([{"_id":"u1","profile":{}}, {"_id":"u2","profile":{}}]);
+    let err = users::confirm_label_filter(&master, "legal_rep", "ws1").unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("ignores --label"), "{msg}");
+    assert!(msg.contains("needs a newer Nestr server"), "{msg}");
+    // A row without the label means the filter wasn't applied.
+    let mixed = serde_json::json!([{"_id":"u1","labels":["legal_rep"]}, {"_id":"u2","labels":[]}]);
+    assert!(users::confirm_label_filter(&mixed, "legal_rep", "ws1").is_err());
+}

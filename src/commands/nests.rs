@@ -278,6 +278,20 @@ impl HintOpts {
         }
         out
     }
+
+    /// The params for reading `ids`. Nestr reads hints only on a single-nest read
+    /// and drops them on `nests/a,b`, where the nests would read as having none,
+    /// so asking for hints on several ids is an error.
+    pub fn params_for(&self, ids: &str) -> anyhow::Result<Vec<(&'static str, String)>> {
+        let out = self.params();
+        if !out.is_empty() && ids.contains(',') {
+            anyhow::bail!(
+                "--hints, --hint-types and --min-severity work on a single nest id: Nestr \
+                 ignores them when reading several nests at once"
+            );
+        }
+        Ok(out)
+    }
 }
 
 /// The single-nest diagnosis params of a nest read: `provenance`, `rights`
@@ -365,17 +379,7 @@ pub async fn resolve_assignees(
     if !assignees.iter().any(|a| a == "me") {
         return Ok(assignees.to_vec());
     }
-    let me = crate::commands::me::fetch_me(client).await?;
-    let my_id = me
-        .get("_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if my_id.is_empty() {
-        return Err(crate::error::NestrError::Validation(
-            "could not resolve `--assignee me`: /users/me returned no id".into(),
-        ));
-    }
+    let my_id = crate::commands::me::my_id(client, "--assignee me").await?;
     Ok(assignees
         .iter()
         .map(|a| if a == "me" { my_id.clone() } else { a.clone() })
@@ -646,7 +650,7 @@ pub async fn run(cmd: NestsCmd, g: &GlobalArgs) -> Result<()> {
                 types: hint_types,
                 min_severity,
             }
-            .params();
+            .params_for(&ids)?;
             hint_params.extend(
                 Diagnosis {
                     provenance,

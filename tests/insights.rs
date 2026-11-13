@@ -95,7 +95,7 @@ async fn history_passes_from_param() {
         .mount(&server)
         .await;
     let client = NestrClient::new(server.uri(), "tok").unwrap();
-    let data = insights::fetch_history(&client, "ws1", "roles", &[("from", "2026-01-01")])
+    let (data, _) = insights::fetch_history(&client, "ws1", "roles", &[("from", "2026-01-01")])
         .await
         .unwrap();
     assert_eq!(data[0]["value"], 11);
@@ -279,4 +279,369 @@ fn compare_text_keeps_every_row_and_sets_the_parent_apart() {
         out.contains("2026-08-31T00:00:00.000Z → 2026-10-01T00:00:00.000Z"),
         "{out}"
     );
+}
+
+// ---- 0.5.2: never present numbers the server didn't scope the way they were asked for.
+// Replies shaped like `origin/master` (production: no `meta`, no from/to) and like
+// `origin/develop` (always `meta.period`; history carries `meta.nestId`/`meta.userId`).
+
+use insights::{confirm, parse_day, Asked, Route};
+
+fn today() -> i64 {
+    parse_day("2026-11-11").unwrap()
+}
+
+fn asked<'a>(
+    from: Option<&'a str>,
+    to: Option<&'a str>,
+    nest: Option<&'a str>,
+    user: Option<&'a str>,
+) -> Asked<'a> {
+    Asked {
+        from,
+        to,
+        nest,
+        user,
+    }
+}
+
+#[test]
+fn parse_day_reads_dates_and_timestamps() {
+    assert_eq!(parse_day("1970-01-02"), Some(1));
+    assert_eq!(parse_day("2026-11-11T13:00:00Z"), parse_day("2026-11-11"));
+    assert_eq!(
+        parse_day("2024-03-01").unwrap() - parse_day("2024-02-28").unwrap(),
+        2
+    );
+    assert_eq!(parse_day("next week"), None);
+    assert_eq!(parse_day("2026-13-01"), None);
+}
+
+#[test]
+fn a_develop_reply_confirms_every_option() {
+    let m = period_meta();
+    let all = asked(Some("2024-01-01"), Some("2024-02-01"), None, None);
+    for route in [Route::List, Route::Get, Route::Compare] {
+        assert!(matches!(confirm(route, &all, Some(&m), today()), Ok(None)));
+    }
+    // An old --to is fine where the server states the period.
+    let old_to = asked(None, Some("2025-01-01"), None, None);
+    assert!(matches!(
+        confirm(Route::List, &old_to, Some(&m), today()),
+        Ok(None)
+    ));
+    let user = asked(None, None, None, Some("u1"));
+    let hist_user = json!({"nestId": "ws1", "userId": "u1"});
+    assert!(matches!(
+        confirm(Route::History, &user, Some(&hist_user), today()),
+        Ok(None)
+    ));
+    let nest = asked(Some("2026-01-01"), Some("2026-02-01"), Some("c1"), None);
+    let hist_nest = json!({"nestId": "c1", "userId": null});
+    assert!(matches!(
+        confirm(Route::History, &nest, Some(&hist_nest), today()),
+        Ok(None)
+    ));
+}
+
+#[test]
+fn a_master_reply_refuses_from_on_list() {
+    let err = confirm(
+        Route::List,
+        &asked(Some("2024-01-01"), Some("2024-02-01"), None, None),
+        None,
+        today(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(matches!(err, NestrError::Ignored(_)), "{err:?}");
+    assert!(msg.contains("ignores --from"), "{msg}");
+    assert!(msg.contains("needs a newer Nestr server"), "{msg}");
+}
+
+#[test]
+fn a_master_reply_takes_a_recent_to_and_says_what_period_it_covers() {
+    let note = confirm(
+        Route::List,
+        &asked(None, Some("2026-11-01"), None, None),
+        None,
+        today(),
+    )
+    .unwrap()
+    .expect("a note on the period");
+    assert!(note.contains("one month before today"), "{note}");
+}
+
+#[test]
+fn a_master_reply_refuses_a_to_from_before_its_period_starts() {
+    for to in ["2025-01-01", "2026-10-14"] {
+        let err = confirm(
+            Route::List,
+            &asked(None, Some(to), None, None),
+            None,
+            today(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("--to"), "{err}");
+    }
+    // A date it can't place is refused too, rather than guessed at.
+    assert!(confirm(
+        Route::List,
+        &asked(None, Some("last tuesday"), None, None),
+        None,
+        today()
+    )
+    .is_err());
+}
+
+#[test]
+fn a_master_reply_needs_nothing_confirmed_for_scope_or_no_options() {
+    let none = asked(None, None, None, None);
+    for route in [Route::List, Route::Get, Route::History, Route::Compare] {
+        assert!(matches!(confirm(route, &none, None, today()), Ok(None)));
+    }
+    // Master's list honours userId and nestId.
+    let scoped = asked(None, None, Some("c1"), None);
+    assert!(matches!(
+        confirm(Route::List, &scoped, None, today()),
+        Ok(None)
+    ));
+    // Both servers honour history's from/to.
+    let span = asked(Some("2026-01-01"), Some("2026-02-01"), None, None);
+    assert!(matches!(
+        confirm(Route::History, &span, None, today()),
+        Ok(None)
+    ));
+}
+
+#[test]
+fn a_master_reply_refuses_get_with_a_period() {
+    for a in [
+        asked(Some("2026-10-01"), None, None, None),
+        asked(None, Some("2026-11-01"), None, None),
+    ] {
+        let err = confirm(Route::Get, &a, None, today()).unwrap_err();
+        assert!(err.to_string().contains("insights get"), "{err}");
+    }
+}
+
+#[test]
+fn a_master_reply_refuses_history_for_a_circle_or_a_person() {
+    let err = confirm(
+        Route::History,
+        &asked(None, None, Some("c1"), None),
+        None,
+        today(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("ignores --nest"), "{err}");
+    let err = confirm(
+        Route::History,
+        &asked(None, None, None, Some("u1")),
+        None,
+        today(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("ignores --user"), "{err}");
+    // A reply scoped to someone else is no confirmation either.
+    let other = json!({"nestId": "ws1", "userId": "u2"});
+    assert!(confirm(
+        Route::History,
+        &asked(None, None, None, Some("u1")),
+        Some(&other),
+        today()
+    )
+    .is_err());
+}
+
+#[test]
+fn list_params_send_end_date_alongside_to() {
+    let params = insights::list_params(&insights::Scope {
+        to: Some("2026-11-01".into()),
+        ..Default::default()
+    });
+    assert!(params.contains(&("to", "2026-11-01".to_string())));
+    assert!(params.contains(&("endDate", "2026-11-01".to_string())));
+    let none = insights::list_params(&insights::Scope::default());
+    assert!(!none.iter().any(|(k, _)| *k == "endDate"));
+}
+
+// ---- The real binary against master- and develop-shaped servers.
+
+fn run_cli(host: &str, args: &[&str]) -> std::process::Output {
+    use nestr_cli::config::{save_profile, AuthKind, CredentialStorage, Profile};
+    // NESTR_HOME is process-wide, and these tests run in parallel.
+    static HOME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = HOME.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    std::env::set_var("NESTR_HOME", tmp.path());
+    let profile = Profile {
+        auth: AuthKind::ApiKey,
+        credential_storage: CredentialStorage::File,
+        host: host.into(),
+        workspace_id: "ws1".into(),
+        api_key: Some("k".into()),
+        oauth_client_id: None,
+        oauth_token_url: None,
+        oauth_authorize_url: None,
+        oauth_tokens: None,
+        client_instance_id: None,
+        default_output_format: None,
+    };
+    save_profile("t", &profile).unwrap();
+    std::env::remove_var("NESTR_HOME");
+    drop(guard);
+    std::process::Command::new(env!("CARGO_BIN_EXE_nestr"))
+        .args(["--profile", "t"])
+        .args(args)
+        .env("NESTR_HOME", tmp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("NESTR_API_KEY")
+        .env_remove("NESTR_PROFILE")
+        .output()
+        .unwrap()
+}
+
+fn master_list() -> serde_json::Value {
+    json!({"status":"success","data":[{"type":"roles","title":"Roles","currentValue":12}]})
+}
+
+fn develop_list() -> serde_json::Value {
+    json!({"status":"success","meta": period_meta(),
+           "data":[{"type":"roles","title":"Roles","currentValue":12}]})
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_refuses_from_on_a_master_server_in_text_and_json() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/workspaces/ws1/insights"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(master_list()))
+        .mount(&server)
+        .await;
+    for out_fmt in ["text", "json"] {
+        let out = run_cli(
+            &server.uri(),
+            &["-o", out_fmt, "insights", "list", "--from", "2024-01-01"],
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{out_fmt}: {stderr}");
+        assert!(out.stdout.is_empty(), "{out_fmt}: printed numbers");
+        assert!(stderr.contains("ignores --from"), "{stderr}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_prints_a_develop_server_reply_for_the_same_options() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/workspaces/ws1/insights"))
+        .and(query_param("from", "2024-01-01"))
+        .and(query_param("to", "2025-01-01"))
+        .and(query_param("endDate", "2025-01-01"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(develop_list()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = run_cli(
+        &server.uri(),
+        &[
+            "-o",
+            "text",
+            "insights",
+            "list",
+            "--from",
+            "2024-01-01",
+            "--end-date",
+            "2025-01-01",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Roles"));
+    assert!(stderr.is_empty(), "no warning on a new server: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_refuses_an_old_to_on_a_master_server() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/workspaces/ws1/insights"))
+        .and(query_param("endDate", "2025-01-01"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(master_list()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = run_cli(&server.uri(), &["insights", "list", "--to", "2025-01-01"]);
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_resolves_user_me_to_the_callers_own_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status":"success","data":{"_id":"u42","profile":{"fullName":"A"}}
+        })))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/workspaces/ws1/insights"))
+        .and(query_param("userId", "u42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(master_list()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/workspaces/ws1/insights/comments/history"))
+        .and(query_param("userId", "u42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status":"success","meta":{"nestId":"ws1","userId":"u42"},"data":[]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = run_cli(&server.uri(), &["insights", "list", "--user", "me"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run_cli(
+        &server.uri(),
+        &["insights", "history", "comments", "--user", "me"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_compare_on_a_server_without_it_says_so_with_a_hint() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/workspaces/ws1/insights/tactical_completed/circles",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "<!DOCTYPE html><html><body>app</body></html>",
+            "text/html; charset=utf-8",
+        ))
+        .mount(&server)
+        .await;
+    let out = run_cli(
+        &server.uri(),
+        &["insights", "compare", "tactical_completed"],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(out.stdout.is_empty());
+    assert!(stderr.contains("needs a newer Nestr server"), "{stderr}");
+    assert!(stderr.contains("insights list --nest"), "{stderr}");
+    assert!(!stderr.contains("<html"), "{stderr}");
 }

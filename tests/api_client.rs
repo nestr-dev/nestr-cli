@@ -165,3 +165,277 @@ async fn a_403_with_a_detail_keeps_the_servers_words() {
         "permission denied: You may not edit this role"
     );
 }
+
+// ---- Unsupported-route detection: an older Nestr server answers a route it
+// doesn't have with its web page (GET) or an empty 405 (writes).
+
+const WEB_PAGE: &str =
+    "<!DOCTYPE html>\n<html><head><title>Nestr</title></head><body>app</body></html>";
+
+#[tokio::test]
+async fn a_web_page_on_200_says_the_server_lacks_the_route() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/ws1/insights/roles/circles"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(WEB_PAGE, "text/html; charset=utf-8"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/workspaces/ws1/insights/roles/circles", &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::Unsupported { .. }),
+        "{err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("doesn't support `GET /workspaces/ws1/insights/roles/circles`"),
+        "{msg}"
+    );
+    assert!(msg.contains("needs a newer Nestr server"), "{msg}");
+    assert!(!msg.contains('<'), "the page must not be printed: {msg}");
+}
+
+#[tokio::test]
+async fn a_body_starting_with_a_tag_counts_as_a_web_page_whatever_its_type() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me/x"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(format!("  {WEB_PAGE}"), "text/plain"),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/users/me/x", &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::Unsupported { .. }),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_web_page_on_404_says_the_server_lacks_the_route() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/a/b"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(WEB_PAGE, "text/html"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/a/b", &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::Unsupported { .. }),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_empty_405_on_a_write_says_the_server_lacks_the_route() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/workspaces/ws1/users/u1/labels/legal_rep"))
+        .respond_with(ResponseTemplate::new(405))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .put::<serde_json::Value>(
+            "/workspaces/ws1/users/u1/labels/legal_rep",
+            &serde_json::json!({}),
+        )
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::Unsupported { .. }),
+        "{err:?}"
+    );
+    assert!(
+        msg.contains("doesn't support `PUT /workspaces/ws1/users/u1/labels/legal_rep`"),
+        "{msg}"
+    );
+    assert!(msg.contains("needs a newer Nestr server"), "{msg}");
+}
+
+#[tokio::test]
+async fn an_empty_405_on_delete_text_says_the_server_lacks_the_route() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/x/y"))
+        .respond_with(ResponseTemplate::new(405))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client.delete_text("/x/y").await.unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::Unsupported { .. }),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn other_non_json_replies_name_the_status_and_type_with_a_clean_snippet() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw("oops \u{1b}]52;c;Zm9v\u{7}not json\nat all", "text/plain"),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/users/me", &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nestr_cli::error::NestrError::NonJson { .. }),
+        "{err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("unexpected non-JSON reply (HTTP 200, text/plain)"),
+        "{msg}"
+    );
+    assert!(msg.contains("oops not json at all"), "{msg}");
+    assert!(!msg.chars().any(|c| c.is_control()), "{msg:?}");
+}
+
+#[tokio::test]
+async fn a_long_non_json_reply_is_cut_short() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("x".repeat(5000), "text/plain"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let msg = client
+        .get::<serde_json::Value>("/users/me", &[])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(msg.len() < 300, "{} chars: {msg}", msg.len());
+}
+
+#[tokio::test]
+async fn a_gateway_web_page_on_5xx_is_not_blamed_on_the_server_version() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(ResponseTemplate::new(502).set_body_raw(WEB_PAGE, "text/html"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/users/me", &[])
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        matches!(
+            err,
+            nestr_cli::error::NestrError::NonJson { status: 502, .. }
+        ),
+        "{err:?}"
+    );
+    assert!(msg.contains("HTTP 502, text/html"), "{msg}");
+    assert!(!msg.contains('<'), "the page must not be printed: {msg}");
+}
+
+#[tokio::test]
+async fn a_json_error_body_still_renders_as_before() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me"))
+        .respond_with(
+            ResponseTemplate::new(500)
+                .set_body_json(serde_json::json!({"status":"error","message":"boom"})),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/users/me", &[])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "API error (500): boom");
+}
+
+#[tokio::test]
+async fn a_success_typed_html_but_not_a_page_is_not_a_missing_route() {
+    // Only the body decides on a 2xx: an empty body or a bare string labelled
+    // text/html is still the route's answer, not the web app's page.
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/workspaces/ws1/webhooks/w1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("\"success\"", "text/html"))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/nests/n1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("", "text/html"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let body = client
+        .delete_text("/workspaces/ws1/webhooks/w1")
+        .await
+        .unwrap();
+    assert_eq!(body, "\"success\"");
+    let v: serde_json::Value = client
+        .patch("/nests/n1", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(v, serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn a_json_not_found_labelled_html_keeps_its_own_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/nests/n1"))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_raw(r#"{"description":"Nest not found"}"#, "text/html"),
+        )
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let err = client
+        .get::<serde_json::Value>("/nests/n1", &[])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "not found: Nest not found");
+}
+
+#[tokio::test]
+async fn a_long_plain_text_scope_refusal_is_still_recognised() {
+    let server = MockServer::start().await;
+    let body = format!(
+        "{} This route is only available for single user scoped access",
+        "x".repeat(150)
+    );
+    Mock::given(method("GET"))
+        .and(path("/users/me/inbox"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(body, "text/plain"))
+        .mount(&server)
+        .await;
+    let client = NestrClient::new(server.uri(), "tok").unwrap();
+    let msg = client
+        .get::<serde_json::Value>("/users/me/inbox", &[])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(msg.contains("grant covers a workspace"), "{msg}");
+}

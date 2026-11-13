@@ -73,6 +73,12 @@ nestr users labels add <userId> legal_rep --field url=https://example.com/r/1   
 nestr users labels set <userId> legal_rep --field url=   # change a field value; empty clears it
 nestr users labels remove <userId> legal_rep   # values are kept, hidden, and return on re-add
 nestr users labels activity <userId> --limit 20   # audit trail (workspace admins)
+```
+
+People labels (`users labels …` and `users list --label`) need a Nestr server with user
+labels, which is rolling out. An older server makes the CLI exit with "needs a newer Nestr server".
+
+```bash
 nestr labels create "Legal rep" --applies-to nests,users --user-fields '[{"id":"url","code":"url","title":"Register","type":"url"}]'
 nestr labels update legal_rep --reset-applies-to   # back to nests only
 nestr labels create "Review" --id review --color '#ff5733' --icon eye --group flow

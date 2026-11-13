@@ -13,6 +13,17 @@ pub async fn fetch_me(client: &NestrClient) -> crate::error::Result<Value> {
     Ok(data)
 }
 
+/// The caller's own user id, for a `me` given as `what` (e.g. `--user me`).
+pub async fn my_id(client: &NestrClient, what: &str) -> crate::error::Result<String> {
+    let me = fetch_me(client).await?;
+    match me.get("_id").and_then(Value::as_str) {
+        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        _ => Err(crate::error::NestrError::Validation(format!(
+            "could not resolve `{what}`: /users/me returned no id"
+        ))),
+    }
+}
+
 /// One line of the caller's user labels in `ws`, or None when there are none.
 pub fn user_labels_line(me: &Value, ws: &str) -> Option<String> {
     let labels: Vec<&str> = me["userLabels"][ws]["labels"]

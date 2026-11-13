@@ -99,6 +99,13 @@ cosign, …) are ignored.
 
 ## Release
 
+Before a release, build the binary and run the live smoke test against production
+with your own profile: `cargo build --release && scripts/smoke-live.sh target/release/nestr`.
+It forces `NESTR_READ_ONLY=1`, runs read-only commands only, and prints PASS/FAIL per
+command. The hermetic tests can't tell what the production server supports; this
+can. A clean "needs a newer Nestr server" refusal passes; a parse error or a printed
+web page fails. It isn't run in CI.
+
 main is protected, so a release goes through a PR. From an up-to-date, clean `main`:
 
 ```sh

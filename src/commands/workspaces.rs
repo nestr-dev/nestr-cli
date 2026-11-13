@@ -13,7 +13,9 @@ use crate::views::AppView;
 pub enum WorkspacesCmd {
     /// List your workspaces.
     List {
-        #[arg(long)]
+        /// Not supported: Nestr's workspace list doesn't filter, so this is refused.
+        /// Use `nestr search` to find nests by text.
+        #[arg(long, hide = true)]
         search: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
@@ -147,6 +149,29 @@ fn render_apps(data: &Value, output: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// The query for `GET workspaces`. That route reads no `search` on any Nestr
+/// server, so `--search` would list every workspace as if it matched; refuse it.
+pub fn list_params(
+    search: Option<&str>,
+    limit: Option<u32>,
+    page: Option<u32>,
+) -> Result<Vec<(&'static str, String)>> {
+    if search.is_some() {
+        anyhow::bail!(
+            "Nestr ignores --search on `nestr workspaces list`, so it would list every \
+             workspace. Leave --search out."
+        );
+    }
+    let mut params = Vec::new();
+    if let Some(l) = limit {
+        params.push(("limit", l.to_string()));
+    }
+    if let Some(p) = page {
+        params.push(("page", p.to_string()));
+    }
+    Ok(params)
+}
+
 pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
     let (cfg, client) = resolve_client(g).await?;
     match cmd {
@@ -155,19 +180,9 @@ pub async fn run(cmd: WorkspacesCmd, g: &GlobalArgs) -> Result<()> {
             limit,
             page,
         } => {
-            let limit = limit.map(|n| n.to_string());
-            let page = page.map(|n| n.to_string());
-            let mut params: Vec<(&str, &str)> = Vec::new();
-            if let Some(s) = &search {
-                params.push(("search", s));
-            }
-            if let Some(l) = &limit {
-                params.push(("limit", l));
-            }
-            if let Some(p) = &page {
-                params.push(("page", p));
-            }
-            let (data, meta) = fetch_list(&client, &params).await?;
+            let params = list_params(search.as_deref(), limit, page)?;
+            let pairs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            let (data, meta) = fetch_list(&client, &pairs).await?;
             render::output_nests(&data, meta.as_ref(), cfg.output, true)?;
         }
         WorkspacesCmd::Docs { cmd } => crate::commands::docs::run(cmd, &cfg, &client).await?,
