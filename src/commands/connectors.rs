@@ -53,11 +53,11 @@ pub enum ConnectorsCmd {
     /// Bind a connector to an owner so it can use it (admin).
     Bind {
         connector_id: String,
-        /// Who gets access. `role` is usually right: the connector's domain is
+        /// Who gets access. `role` is usually right: the role's connector for it is
         /// found or created under the role.
         #[arg(long, value_enum)]
         owner_type: OwnerType,
-        /// role: role nest id. role-domain: domain nest id. workspace: workspace id.
+        /// role: role nest id. role-connector: the role's connector nest id. workspace: workspace id.
         /// user: the person's user id. agent: the agent's user id.
         #[arg(long)]
         owner: String,
@@ -110,7 +110,7 @@ pub struct ConnectorSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum OwnerType {
     Role,
-    RoleDomain,
+    RoleConnector,
     Workspace,
     User,
     Agent,
@@ -120,7 +120,7 @@ impl OwnerType {
     pub fn as_str(self) -> &'static str {
         match self {
             OwnerType::Role => "role",
-            OwnerType::RoleDomain => "role-domain",
+            OwnerType::RoleConnector => "role-connector",
             OwnerType::Workspace => "workspace",
             OwnerType::User => "user",
             OwnerType::Agent => "agent",

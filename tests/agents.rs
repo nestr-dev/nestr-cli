@@ -131,7 +131,7 @@ async fn reach_unwraps_envelope() {
         .and(path("/workspaces/ws1/agents/a1/connectors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status":"success",
-            "data":[{"connectionId":"c1","connectorName":"Xero","source":"role-domain",
+            "data":[{"connectionId":"c1","connectorName":"Xero","source":"role-connector",
                      "available":false,"reason":"no-credential"}]
         })))
         .mount(&server)

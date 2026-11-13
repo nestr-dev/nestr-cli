@@ -177,13 +177,13 @@ async fn remove_deletes_connector() {
 #[test]
 fn bind_body_nests_owner() {
     assert_eq!(
-        connectors::bind_body("k1", OwnerType::RoleDomain, "d1"),
-        json!({"connectorId":"k1","owner":{"type":"role-domain","id":"d1"}})
+        connectors::bind_body("k1", OwnerType::RoleConnector, "d1"),
+        json!({"connectorId":"k1","owner":{"type":"role-connector","id":"d1"}})
     );
 }
 
 #[tokio::test]
-async fn bind_posts_connection_and_returns_domain() {
+async fn bind_posts_connection_and_returns_connector_nest() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/workspaces/ws1/connections"))
@@ -192,8 +192,8 @@ async fn bind_posts_connection_and_returns_domain() {
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status":"success",
-            "data":{"_id":"c1","owner":{"type":"role-domain","id":"d1"},
-                    "domainId":"d1","domainCreated":true}
+            "data":{"_id":"c1","owner":{"type":"role-connector","id":"d1"},
+                    "connectorNestId":"d1","connectorNestCreated":true}
         })))
         .mount(&server)
         .await;
@@ -202,7 +202,7 @@ async fn bind_posts_connection_and_returns_domain() {
     let data = connectors::bind_connector(&client, "ws1", &body)
         .await
         .unwrap();
-    assert_eq!(data["domainId"], "d1");
+    assert_eq!(data["connectorNestId"], "d1");
 }
 
 #[tokio::test]
@@ -213,7 +213,7 @@ async fn connections_list_hits_list_route() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status":"success",
             "data":[{"connectionId":"c1","connectorName":"Xero",
-                     "owner":{"type":"role-domain","id":"d1"},"ownerLabel":"Bookkeeper (Finance) / Books",
+                     "owner":{"type":"role-connector","id":"d1"},"ownerLabel":"Bookkeeper (Finance) / Books",
                      "connectedCount":1,"authorizations":[]}]
         })))
         .mount(&server)
@@ -406,7 +406,7 @@ fn shared_reach_says_nothing_when_sharing_does_not_apply() {
 fn held_connection() -> serde_json::Value {
     json!({
         "connectionId":"conn1","connectorName":"Gmail",
-        "owner":{"type":"role-domain","id":"d1"},"status":"active","connectedCount":1,
+        "owner":{"type":"role-connector","id":"d1"},"status":"active","connectedCount":1,
         "authorizations":[{"scope":"personal","connected":true}],
         "pendingInstructionApprovals":[{
             "nestId":"r1","nestTitle":"Finance","connectorName":"Gmail",
@@ -462,8 +462,8 @@ fn connections_list_explains_a_shared_account_the_connector_no_longer_allows() {
 #[test]
 fn agent_reach_marks_a_connector_held_for_instruction_approval() {
     let reach = json!([
-        {"connectionId":"conn1","connectorName":"Gmail","source":"role-domain","available":true,
-         "reason":null,"roleTitle":"Finance","domainTitle":"Mailbox","scope":"personal"},
+        {"connectionId":"conn1","connectorName":"Gmail","source":"role-connector","available":true,
+         "reason":null,"roleTitle":"Finance","connectorTitle":"Mailbox","scope":"personal"},
         {"connectionId":"conn2","connectorName":"Drive","source":"workspace","available":true,
          "reason":null,"scope":"shared"}
     ]);

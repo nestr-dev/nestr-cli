@@ -588,8 +588,9 @@ pub struct AgentReachView {
     pub reason: Option<String>,
     #[serde(default, rename = "roleTitle")]
     pub role_title: Option<String>,
-    #[serde(default, rename = "domainTitle")]
-    pub domain_title: Option<String>,
+    /// The role's connector the access comes through (`domainTitle` on older servers).
+    #[serde(default, rename = "connectorTitle", alias = "domainTitle")]
+    pub connector_title: Option<String>,
     #[serde(default)]
     pub scope: Option<String>,
 }
@@ -790,11 +791,27 @@ mod tests {
     #[test]
     fn connection_view_reads_owner_type() {
         let c: ConnectionView = serde_json::from_value(json!({
-            "connectionId":"c1","connectorName":"Xero","owner":{"type":"role-domain","id":"d1"}
+            "connectionId":"c1","connectorName":"Xero","owner":{"type":"role-connector","id":"d1"}
         }))
         .unwrap();
         assert_eq!(c.id, "c1");
-        assert_eq!(c.owner_type(), "role-domain");
+        assert_eq!(c.owner_type(), "role-connector");
+    }
+
+    #[test]
+    fn agent_reach_view_reads_connector_title_and_older_domain_title() {
+        let now: AgentReachView = serde_json::from_value(json!({
+            "connectionId":"c1","connectorName":"Gmail","source":"role-connector",
+            "roleTitle":"Office","connectorTitle":"Mailbox"
+        }))
+        .unwrap();
+        assert_eq!(now.connector_title.as_deref(), Some("Mailbox"));
+        let older: AgentReachView = serde_json::from_value(json!({
+            "connectionId":"c1","connectorName":"Gmail","source":"role-domain",
+            "roleTitle":"Office","domainTitle":"Mailbox"
+        }))
+        .unwrap();
+        assert_eq!(older.connector_title.as_deref(), Some("Mailbox"));
     }
 
     #[test]
