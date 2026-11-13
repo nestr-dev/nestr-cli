@@ -8,7 +8,9 @@ description: Use when setting up or operating Nestr agents and connectors from t
 An **agent** is a bot user in the workspace. It does work when it fills a role or
 is assigned to a task. A **connector** is a catalog entry for an outside tool (an
 MCP server, an API or a CLI). A **connection** binds a connector to an owner, usually
-a role's domain, and a person connects an account to it through a link.
+a role: the access is recorded as one of the role's connectors (a governance list of
+its own, next to accountabilities and domains), and a person connects an account to it
+through a link.
 
 First run `nestr profiles add` (OAuth or API key) — a profile pairs a **workspace**
 with an **identity**. Global flags on every command: `-p/--profile`, `-o text|json`,
@@ -132,10 +134,10 @@ nestr connectors connections list --include-disabled
 ```
 
 **Bind to the role**, not to whoever fills it. The access then belongs to the work and
-survives a change of filler. The server finds or creates the connector's domain under
-the role. The other owner types:
+survives a change of filler. The server finds or creates the role's connector for it and
+reports its id. The other owner types:
 
-- `role-domain`: an existing domain nest, when you already have its id.
+- `role-connector`: an existing connector nest on a role, when you already have its id.
 - `workspace`: everyone in the workspace.
 - `user` or `agent`: one person's or one agent's own account, such as their own
   mailbox. This needs the connector to allow personal owners.

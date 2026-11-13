@@ -1360,8 +1360,8 @@ pub fn agent_reach_text(data: &Value, agent: &str, connections: Option<&Value>) 
     let rows = reach
         .iter()
         .map(|r| {
-            let via = match (&r.role_title, &r.domain_title) {
-                (Some(role), Some(domain)) => format!("{role} / {domain}"),
+            let via = match (&r.role_title, &r.connector_title) {
+                (Some(role), Some(connector)) => format!("{role} / {connector}"),
                 (Some(role), None) => role.clone(),
                 _ => String::new(),
             };
@@ -1622,17 +1622,26 @@ pub fn connections_text(data: &Value, host: &str) -> String {
 }
 
 /// The result of binding a connector: the new connection and, for a role owner,
-/// the domain that now holds the access.
+/// the connector nest that now holds the access.
 pub fn connection_bound(data: &Value, output: OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => print_json(data)?,
         OutputFormat::Text => {
             let id = data.get("_id").and_then(Value::as_str).unwrap_or("");
             println!("Connection created [{id}].");
-            if let Some(domain) = data.get("domainId").and_then(Value::as_str) {
-                let created = data.get("domainCreated").and_then(Value::as_bool) == Some(true);
+            // connectorNestId since connectors left domains; domainId on older servers.
+            let nest = data
+                .get("connectorNestId")
+                .or_else(|| data.get("domainId"))
+                .and_then(Value::as_str);
+            if let Some(nest) = nest {
+                let created = data
+                    .get("connectorNestCreated")
+                    .or_else(|| data.get("domainCreated"))
+                    .and_then(Value::as_bool)
+                    == Some(true);
                 let verb = if created { "created" } else { "found" };
-                println!("domain: {domain} ({verb})");
+                println!("connector: {nest} ({verb})");
             }
             println!(
                 "Nobody can use it until an account is connected: run `nestr connectors connections link {id}` and give the link to a person to open."
