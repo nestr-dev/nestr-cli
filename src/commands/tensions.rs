@@ -113,8 +113,10 @@ pub enum PartsCmd {
         description: Option<String>,
         #[arg(long)]
         parent: Option<String>,
+        /// Accountability title on the new item (repeatable).
         #[arg(long = "accountability")]
         accountabilities: Vec<String>,
+        /// Domain title on the new item (repeatable).
         #[arg(long = "domain")]
         domains: Vec<String>,
         #[arg(long = "user")]
@@ -140,8 +142,12 @@ pub enum PartsCmd {
         role: Option<String>,
         #[arg(long)]
         parent: Option<String>,
+        /// Accountability title (repeatable). Passing any replaces the
+        /// accountabilities; leave the flag out to keep them as they are.
         #[arg(long = "accountability")]
         accountabilities: Vec<String>,
+        /// Domain title (repeatable). Passing any replaces the domains; leave
+        /// the flag out to keep them as they are.
         #[arg(long = "domain")]
         domains: Vec<String>,
         #[arg(long = "user")]
@@ -171,8 +177,12 @@ pub enum PartsCmd {
         label: Option<String>,
         #[arg(long)]
         parent: Option<String>,
+        /// Accountability title (repeatable). Passing any replaces the
+        /// accountabilities; leave the flag out to keep them as they are.
         #[arg(long = "accountability")]
         accountabilities: Vec<String>,
+        /// Domain title (repeatable). Passing any replaces the domains; leave
+        /// the flag out to keep them as they are.
         #[arg(long = "domain")]
         domains: Vec<String>,
         #[arg(long = "user")]

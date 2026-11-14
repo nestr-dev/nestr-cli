@@ -59,6 +59,13 @@ nestr tensions parts modify <circleId> <tensionId> <partId> --title "Renamed ste
 nestr tensions parts children add <circleId> <tensionId> <partId> --title "X" --label accountability
 ```
 
+On `propose-update` and `modify`, each list stands on its own. Passing
+`--accountability` replaces the accountabilities and leaves the domains as they
+are; passing `--domain` replaces the domains and leaves the accountabilities.
+A list you don't pass is never dropped. The CLI only sends a list when you give
+it at least one value, so to remove items use
+`nestr tensions parts children delete`.
+
 Review exactly what will change before you submit:
 
 ```bash
