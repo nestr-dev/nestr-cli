@@ -49,8 +49,8 @@ pub enum UsersCmd {
         #[command(subcommand)]
         cmd: UserGroupsCmd,
     },
-    /// Put labels on people and set their user fields. Needs a Nestr server with
-    /// user labels (rolling out).
+    /// Put labels on people and set their user fields. Writes go through the member
+    /// route and need Nestr web 2026-11-17 or later.
     Labels {
         #[command(subcommand)]
         cmd: UserLabelsCmd,
@@ -60,6 +60,7 @@ pub enum UsersCmd {
 #[derive(Subcommand)]
 pub enum UserLabelsCmd {
     /// Put a label on a member (admin by default), optionally with field values.
+    /// Reads the member's labels first, since a label write sends the whole set.
     Add {
         user_id: String,
         label_id: String,
@@ -68,7 +69,8 @@ pub enum UserLabelsCmd {
         #[arg(long = "field")]
         fields: Vec<String>,
     },
-    /// Take a label off a member. The values are kept, hidden.
+    /// Take a label off a member. The values are kept, hidden. Reads the member's
+    /// labels first, since a label write sends the whole set.
     Remove { user_id: String, label_id: String },
     /// Set field values on a label the member holds. `--field code=` clears a value.
     Set {
@@ -207,51 +209,199 @@ pub async fn set_user_groups(
     Ok(data)
 }
 
-fn user_label_path(ws: &str, user_id: &str, label_id: &str) -> String {
-    format!("/workspaces/{ws}/users/{user_id}/labels/{label_id}")
+// Labels and field values are written on the member itself, as PATCH
+// /workspaces/:ws/users/:id with `labels` and `fields`, the shape a nest write takes
+// (Nestr web 2026-11-17 and later; the per-label routes are gone). `labels` is the
+// whole set, so add and remove read the member's set first and send it back with one
+// label more or less. `fields` is keyed `<label>.<field>` and only the keys given change.
+
+const MEMBER_ROUTE_NEEDED: &str = "needs a newer Nestr server (Nestr web 2026-11-17 or later)";
+
+/// The short id the member route takes (`legal_rep`), from a short or a qualified
+/// `<ws>:legal_rep` id, as the server shortens it.
+pub fn short_label_id<'a>(ws: &str, label_id: &'a str) -> &'a str {
+    label_id
+        .strip_prefix(ws)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .unwrap_or(label_id)
 }
 
-/// Body for add/set: `{"fields": {...}}`, or None when no fields were given.
-pub fn fields_body(fields: &Map<String, Value>) -> Option<Value> {
-    (!fields.is_empty()).then(|| serde_json::json!({ "fields": fields }))
+/// `--field` values for one label, keyed `<label>.<field>` as the member route takes
+/// them. A key already given as `<label>.<field>` is kept. An empty value is sent as
+/// null, which is how the member route clears one.
+pub fn label_fields(short: &str, fields: &Map<String, Value>) -> Map<String, Value> {
+    let prefix = format!("{short}.");
+    fields
+        .iter()
+        .map(|(k, v)| {
+            let key = if k.starts_with(&prefix) {
+                k.clone()
+            } else {
+                format!("{prefix}{k}")
+            };
+            let value = match v {
+                Value::String(s) if s.is_empty() => Value::Null,
+                other => other.clone(),
+            };
+            (key, value)
+        })
+        .collect()
 }
 
+/// Body that adds `short` to the labels the member holds, with its field values.
+pub fn add_label_body(held: &[String], short: &str, fields: &Map<String, Value>) -> Value {
+    let mut labels: Vec<Value> = held.iter().map(|l| Value::from(l.as_str())).collect();
+    labels.push(short.into());
+    let mut body = Map::new();
+    body.insert("labels".into(), Value::Array(labels));
+    if !fields.is_empty() {
+        body.insert("fields".into(), Value::Object(label_fields(short, fields)));
+    }
+    Value::Object(body)
+}
+
+/// Body that leaves `short` out of the labels the member holds, keeping the others.
+pub fn remove_label_body(held: &[String], short: &str) -> Value {
+    let labels: Vec<&str> = held
+        .iter()
+        .map(String::as_str)
+        .filter(|l| *l != short)
+        .collect();
+    serde_json::json!({ "labels": labels })
+}
+
+/// Body that sets field values on a label the member holds. It carries no `labels`,
+/// so the member's set is left alone.
+pub fn set_fields_body(short: &str, fields: &Map<String, Value>) -> Value {
+    serde_json::json!({ "fields": label_fields(short, fields) })
+}
+
+/// A member's labels (short ids) and field values, as the member routes report them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelState {
+    pub labels: Vec<String>,
+    pub fields: Map<String, Value>,
+}
+
+impl LabelState {
+    /// Read from a member reply. A reply without `labels` comes from a server that
+    /// does not put user labels on members, or, for a write, one that ignored them.
+    fn from_member(data: &Value, what: &str) -> crate::error::Result<Self> {
+        let Some(labels) = data.get("labels").and_then(Value::as_array) else {
+            return Err(crate::error::NestrError::Ignored(format!(
+                "this Nestr server {what}. `nestr users labels` {MEMBER_ROUTE_NEEDED}."
+            )));
+        };
+        Ok(Self {
+            labels: labels
+                .iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect(),
+            fields: data
+                .get("fields")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+        })
+    }
+
+    fn holds(&self, short: &str) -> bool {
+        self.labels.iter().any(|l| l == short)
+    }
+
+    fn same_as(&self, other: &Self) -> bool {
+        let mut a = self.labels.clone();
+        let mut b = other.labels.clone();
+        a.sort();
+        b.sort();
+        a == b && self.fields == other.fields
+    }
+}
+
+async fn read_member_labels(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+) -> crate::error::Result<LabelState> {
+    let data = fetch_get(client, ws, user_id).await?;
+    LabelState::from_member(&data, "does not show labels on members")
+}
+
+async fn patch_member_labels(
+    client: &NestrClient,
+    ws: &str,
+    user_id: &str,
+    body: &Value,
+) -> crate::error::Result<LabelState> {
+    let data = update_user(client, ws, user_id, body).await?;
+    LabelState::from_member(
+        &data,
+        "answered the label write without the member's labels, so it did not take them",
+    )
+}
+
+/// What the label commands print: `{userId, label, changed, labels, fields}`.
+fn label_change(user_id: &str, short: &str, before: &LabelState, after: &LabelState) -> Value {
+    serde_json::json!({
+        "userId": user_id,
+        "label": short,
+        "changed": !before.same_as(after),
+        "labels": after.labels,
+        "fields": after.fields,
+    })
+}
+
+/// Put a label on a member, with optional field values. A label the member already
+/// holds is left exactly as it is, fields included, and nothing is written.
 pub async fn add_user_label(
     client: &NestrClient,
     ws: &str,
     user_id: &str,
     label_id: &str,
-    body: &Value,
+    fields: &Map<String, Value>,
 ) -> crate::error::Result<Value> {
-    let raw: Value = client
-        .post(&user_label_path(ws, user_id, label_id), body)
-        .await?;
-    Ok(unwrap_data(raw).0)
+    let short = short_label_id(ws, label_id);
+    let before = read_member_labels(client, ws, user_id).await?;
+    if before.holds(short) {
+        return Ok(label_change(user_id, short, &before, &before));
+    }
+    let body = add_label_body(&before.labels, short, fields);
+    let after = patch_member_labels(client, ws, user_id, &body).await?;
+    Ok(label_change(user_id, short, &before, &after))
 }
 
+/// Set field values on a label the member holds. Only the given fields change.
 pub async fn set_user_label_fields(
     client: &NestrClient,
     ws: &str,
     user_id: &str,
     label_id: &str,
-    body: &Value,
+    fields: &Map<String, Value>,
 ) -> crate::error::Result<Value> {
-    let raw: Value = client
-        .patch(&user_label_path(ws, user_id, label_id), body)
-        .await?;
-    Ok(unwrap_data(raw).0)
+    let short = short_label_id(ws, label_id);
+    let before = read_member_labels(client, ws, user_id).await?;
+    let body = set_fields_body(short, fields);
+    let after = patch_member_labels(client, ws, user_id, &body).await?;
+    Ok(label_change(user_id, short, &before, &after))
 }
 
+/// Take a label off a member. Its values are kept, hidden. Nothing is written when
+/// the member does not hold it.
 pub async fn remove_user_label(
     client: &NestrClient,
     ws: &str,
     user_id: &str,
     label_id: &str,
 ) -> crate::error::Result<Value> {
-    let raw: Value = client
-        .delete(&user_label_path(ws, user_id, label_id))
-        .await?;
-    Ok(unwrap_data(raw).0)
+    let short = short_label_id(ws, label_id);
+    let before = read_member_labels(client, ws, user_id).await?;
+    if !before.holds(short) {
+        return Ok(label_change(user_id, short, &before, &before));
+    }
+    let body = remove_label_body(&before.labels, short);
+    let after = patch_member_labels(client, ws, user_id, &body).await?;
+    Ok(label_change(user_id, short, &before, &after))
 }
 
 pub async fn fetch_label_activity(
@@ -461,8 +611,7 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
             } => {
                 safety::enforce_read_only(g.read_only, "users labels add")?;
                 let parsed = super::nests::parse_field_args(&fields)?;
-                let body = fields_body(&parsed).unwrap_or_else(|| serde_json::json!({}));
-                let data = add_user_label(&client, &ws, &user_id, &label_id, &body).await?;
+                let data = add_user_label(&client, &ws, &user_id, &label_id, &parsed).await?;
                 render_label_change(&data, "added", cfg.output)?;
             }
             UserLabelsCmd::Remove { user_id, label_id } => {
@@ -481,8 +630,8 @@ pub async fn run(cmd: UsersCmd, g: &GlobalArgs) -> Result<()> {
             } => {
                 safety::enforce_read_only(g.read_only, "users labels set")?;
                 let parsed = super::nests::parse_field_args(&fields)?;
-                let body = fields_body(&parsed).unwrap_or_default();
-                let data = set_user_label_fields(&client, &ws, &user_id, &label_id, &body).await?;
+                let data =
+                    set_user_label_fields(&client, &ws, &user_id, &label_id, &parsed).await?;
                 render_label_change(&data, "updated", cfg.output)?;
             }
             UserLabelsCmd::Activity { user_id, limit } => {

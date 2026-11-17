@@ -76,7 +76,10 @@ nestr users labels activity <userId> --limit 20   # audit trail (workspace admin
 ```
 
 People labels (`users labels …` and `users list --label`) need a Nestr server with user
-labels, which is rolling out. An older server makes the CLI exit with "needs a newer Nestr server".
+labels. Label and field writes go through the member itself (`PATCH /workspaces/:ws/users/:id`
+with `labels` and `fields`, as on a nest) and need Nestr web 2026-11-17 or later; `add` and
+`remove` read the member's labels first, because a write sends the whole set. An older server
+makes the CLI exit with "needs a newer Nestr server".
 
 ```bash
 nestr labels create "Legal rep" --applies-to nests,users --user-fields '[{"id":"url","code":"url","title":"Register","type":"url"}]'
